@@ -17,13 +17,14 @@ class DatasetAnnotation:
         if not os.path.exists(self.output_csv):
             # make dir
             os.makedirs(os.path.dirname(self.output_csv), exist_ok=True)
-            df = pd.DataFrame(columns=['ImageID', 'Label'])
+            df = pd.DataFrame(columns=['image', 'path', 'label'])
             df.to_csv(self.output_csv, index=False)
     
     def append_annotation_to_csv(self, image_id, label):
         """Append the annotation to the CSV file."""
-        # Append the annotation to the CSV file
-        df = pd.DataFrame([[image_id, label]], columns=['ImageID', 'Label'])
+        # Append the annotation to the CSV file'
+        path = self.data_folder
+        df = pd.DataFrame([[image_id, path, label]], columns=['image', 'path', 'label'])
         df.to_csv(self.output_csv, mode='a', index=False, header=not os.path.exists(self.output_csv))
 
     @property
@@ -37,7 +38,7 @@ class DatasetAnnotation:
         if not os.path.exists(self.output_csv):
             return []
         else:
-            return pd.read_csv(self.output_csv)['ImageID'].tolist()
+            return pd.read_csv(self.output_csv)['image'].tolist()
 
     @property
     def image_ids_not_annotated(self):
@@ -46,7 +47,7 @@ class DatasetAnnotation:
         if not os.path.exists(self.output_csv):
             return self.image_ids
         else:
-            annotated_ids = pd.read_csv(self.output_csv)['ImageID'].tolist()
+            annotated_ids = pd.read_csv(self.output_csv)['image'].tolist()
             return [image_id for image_id in self.all_ids if image_id not in annotated_ids]
         
     def get_random_image(self):
