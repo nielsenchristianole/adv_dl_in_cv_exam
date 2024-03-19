@@ -5,7 +5,7 @@
 # GLOBALS                                                                       #
 #################################################################################
 
-PROJECT_NAME = 02460_Project2
+PROJECT_NAME = adv_dl_in_cv_exam
 PYTHON_VERSION = 3.10
 PYTHON_INTERPRETER = python
 
