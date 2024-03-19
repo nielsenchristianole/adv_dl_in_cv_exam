@@ -32,6 +32,14 @@ class DatasetAnnotation:
         return os.listdir(self.data_folder)
     
     @property
+    def annotated_ids(self):
+        '''Return the image ids that have been annotated.'''
+        if not os.path.exists(self.output_csv):
+            return []
+        else:
+            return pd.read_csv(self.output_csv)['ImageID'].tolist()
+
+    @property
     def image_ids_not_annotated(self):
         """Return the image ids that have not been annotated yet."""
         # Check which images have not been annotated yet
@@ -57,6 +65,13 @@ class DatasetAnnotation:
         ax.imshow(img)  
         # Show image name 
         ax.set_title(image_id)
+            
+        num_annotations = len(self.annotated_ids)
+        # Clear the figure to remove previous annotation count text
+        fig.texts.clear()
+        # Show number of annotated images at the top of the figure
+        fig.text(0.95, 0.98, f"Annotated: {num_annotations}", verticalalignment='top', horizontalalignment='right', fontsize=15)
+
         fig.canvas.draw()  
 
     def _on_key(self, event):
