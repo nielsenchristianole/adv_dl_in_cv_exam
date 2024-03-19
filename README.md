@@ -4,7 +4,7 @@
 ## Get data with dvc
 To get the data, run the following:
 ```bash
-dvc pull
+python -m dvc pull
 ```
 
 > [!NOTE]  
