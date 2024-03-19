@@ -67,10 +67,12 @@ class DatasetAnnotation:
         ax.set_title(image_id)
             
         num_annotations = len(self.annotated_ids)
+        n_images = len(self.all_ids)
         # Clear the figure to remove previous annotation count text
         fig.texts.clear()
         # Show number of annotated images at the top of the figure
-        fig.text(0.95, 0.98, f"Annotated: {num_annotations}", verticalalignment='top', horizontalalignment='right', fontsize=15)
+        fig.text(0.95, 0.98, f"Annotated: {num_annotations} ({num_annotations/n_images*100:.2f}%)", verticalalignment='top', horizontalalignment='right', fontsize=10)
+        # show percentage of annotated images below
 
         fig.canvas.draw()  
 
