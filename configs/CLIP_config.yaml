@@ -1,0 +1,7 @@
+CLIP:
+  pretrained_ckpt: openai/clip-vit-base-patch32
+  latent_dim: 768
+
+Head:
+  out_dim: 2 # output dimension of classification head
+  
