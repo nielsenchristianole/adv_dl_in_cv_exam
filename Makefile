@@ -6,6 +6,7 @@
 #################################################################################
 
 PROJECT_NAME = adv_dl_in_cv_exam
+PROJECT_DIR = src
 PYTHON_VERSION = 3.10
 PYTHON_INTERPRETER = python
 
@@ -32,3 +33,6 @@ clean:
 #################################################################################
 # PROJECT RULES                                                                 #
 #################################################################################
+
+annotate:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/image_annotation/annotate.py
