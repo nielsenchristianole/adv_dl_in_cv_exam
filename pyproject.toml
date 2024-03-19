@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adv_dl_in_cv_exam"
+version = "0.0.1"
+authors = [
+  { name="Andreas Fiehn", email="s204124@dtu.dk" },
+  { name="Michael Harborg", email="s204138@dtu.dk" },
+  { name="Christian Ole Nielsen", email="s204131@dtu.dk"},
+  { name="Calle Ryge", email="s204114@dtu.dk"}
+]
+description = "02501 Exam project"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/nielsenchristianole/adv_dl_in_cv_exam"
+Issues = "https://github.com/nielsenchristianole/adv_dl_in_cv_exam/issues"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.ruff]
+line-length = 120
