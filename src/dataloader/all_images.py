@@ -19,10 +19,12 @@ class AllImageDataset(Dataset):
     def __init__(
         self,
         root_dir: PathLike,
-        label_to_search_string: dict[str, str],
+        label_to_search_string: Optional[dict[str, str]]=None,
         transform: Optional[transforms.Compose] = None,
-        device: torch.device = torch.device('cpu')
+        device: torch.device = torch.device('cpu'),
+        use_relative_path_as_label: bool = False
     ) -> None:
+        label_to_search_string = label_to_search_string or dict()
         assert 'default' not in label_to_search_string, "The label 'default' is reserved for leftover images."
         
         all_paths = set(glob('**/*.jpg', root_dir=root_dir, recursive=True))
@@ -50,16 +52,21 @@ class AllImageDataset(Dataset):
         self.label_to_index = {label: i for i, label in enumerate(np.unique(self.annotations['label']))}
         self.index_to_label = list(self.label_to_index.keys())
         self.device = device
+        self.use_relative_path_as_label = use_relative_path_as_label
 
     def __len__(self) -> int:
         return len(self.annotations)
 
-    def __getitem__(self, index: int) -> Tuple[Image.Image, torch.Tensor]:
+    def __getitem__(self, index: int) -> Tuple[Image.Image, torch.Tensor | str]:
         _, relative_path, label = self.annotations.iloc[index]
         path = os.path.join(self.root_dir, relative_path)
         image = Image.open(path).convert('RGB')
         image = self.transform(image).to(self.device)
         label = torch.tensor(self.label_to_index[label]).to(self.device)
+
+        if self.use_relative_path_as_label:
+            return (image, relative_path)
+
         return (image, label)
 
     def subset(self, labels: list[str]) -> 'AllImageDataset':
