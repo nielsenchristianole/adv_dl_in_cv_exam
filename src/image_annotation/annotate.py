@@ -10,6 +10,7 @@ from glob import glob
 from collections import deque
 
 from src.utils.config import Config
+from src.utils.misc import split_path
 
 
 
@@ -36,16 +37,11 @@ class DatasetAnnotation:
         df = pd.read_csv(self.output_csv)
         self.annotated_set = set(df['path'])
         self.not_annotated_queue = deque(np.random.permutation(list(set(self.all_paths) - self.annotated_set)))
-        
-    def split_path(self, path: PathLike) -> tuple[str, str, str]:
-        _dir, filename = os.path.split(path)
-        image_id, ext = os.path.splitext(filename)
-        return _dir, image_id, ext
 
     def append_annotation_to_csv(self, path: PathLike, label: str):
         """Append the annotation to the CSV file."""
         # Append the annotation to the CSV file'
-        _, image_id, _ = self.split_path(path)
+        _, image_id, _ = split_path(path)
         row = [image_id, path, label]
         df = pd.DataFrame([row], columns=self.columns)
         df.to_csv(self.output_csv, mode='a', index=False, header=not os.path.exists(self.output_csv))
@@ -71,7 +67,7 @@ class DatasetAnnotation:
         ax = self.annotate_ax
         fig = self.annotate_fig
         ax.clear()
-        _, image_id, _ = self.split_path(path)
+        _, image_id, _ = split_path(path)
         img = Image.open(path)
         ax.imshow(img)  
         # Show image name 
