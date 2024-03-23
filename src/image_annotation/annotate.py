@@ -71,7 +71,7 @@ class DatasetAnnotation:
         img = Image.open(path)
         ax.imshow(img)  
         # Show image name 
-        ax.set_title(image_id)
+        ax.set_title(f"image: {image_id}, 1:great,2:okay,3:meh,4:nope")
         
         num_annotations = len(self.annotated_set)
         n_images = len(self.all_paths)
