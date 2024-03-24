@@ -8,6 +8,7 @@ from src.utils.misc import load_config
 import pdb
 from abc import ABC, abstractmethod
 from enum import Enum
+from typing import Optional
 
 
 class EmbType(Enum):
@@ -96,10 +97,14 @@ class CLIPWithHead(nn.Module):
         for param in self.parameters():
             param.requires_grad = False
 
-    def proces_input(self, image: torch.Tensor) ->  torch.Tensor:
-        return self.processor(images=image, return_tensors="pt", padding=True)['pixel_values']
+    def proces_input(self, image):
+        if hasattr(image, 'device'):
+            device = image.device
+        else:
+            device = torch.device('cpu')
+        return self.processor(images=image, return_tensors="pt", padding=True)['pixel_values'].to(device)
 
-    def embed_image(self, image, preprocess=True):
+    def embed_image(self, image: torch.Tensor, preprocess=True):
         """
         Either embed for classification (few-show) or for zero-shot
         """
@@ -129,8 +134,8 @@ class CLIPWithHead(nn.Module):
         return [self.head.index_class[i] for i in logits.argmax(dim=1)]
     
     @staticmethod
-    def get_example_image():
-        url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+    def get_example_image(url: Optional[str]=None):
+        url = url or "http://images.cocodataset.org/val2017/000000039769.jpg"
         return Image.open(requests.get(url, stream=True).raw)
 
     @classmethod
