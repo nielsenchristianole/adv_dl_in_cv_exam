@@ -1,42 +1,159 @@
 import torch
 import torch.nn as nn
-from transformers import CLIPImageProcessor, CLIPVisionModel
+import torch.nn.functional as F
+from transformers import CLIPImageProcessor, CLIPModel, AutoTokenizer
 import requests
 from PIL import Image
 from src.utils.misc import load_config
 import pdb
+from abc import ABC, abstractmethod
+from enum import Enum
+
+
+class EmbType(Enum):
+    CLASSIFICATION = 'classification'
+    ZEROSHOT = 'zeroshot'
+
+
+class ClipHead(nn.Module, ABC):
+    requires_emb_type = EmbType
+    index_class: list[str]
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @abstractmethod
+    def forward(x: torch.Tensor) -> torch.Tensor:
+        """
+        Takes x of shape (batch_dim, emb_dim)
+
+        Returns shape of (batch_dim, num_classes)
+        """
+
+
+class LinearHead(ClipHead):
+
+    def __init__(self, classes: list[str], config_path: str = 'configs/CLIP_config.yaml') -> None:
+        super().__init__()
+        emb_dim = load_config(config_path)['CLIP']['latent_dim']
+        self.head = nn.Linear(emb_dim, len(classes))
+
+        self.requires_emb_type = ClipHead.requires_emb_type.CLASSIFICATION
+
+        self.index_class = classes
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(x)
+
+
+class ZeroShotHead(ClipHead):
+
+    def __init__(self, class_prompts: list[str], config_path: str = 'configs/CLIP_config.yaml') -> None:
+        super().__init__()
+
+        model_version = load_config(config_path)['CLIP']['pretrained_ckpt']
+
+        clipmodel = CLIPModel.from_pretrained(model_version)
+        tokenizer = AutoTokenizer.from_pretrained(model_version)
+        inputs = tokenizer(class_prompts, padding=True, return_tensors="pt")
+        output = clipmodel.text_model(**inputs)
+        
+        emb = output[1]
+        proj_emb = clipmodel.text_projection(emb)
+        proj_emb /= proj_emb.norm(p=2, dim=-1, keepdim=True)
+
+        self._weights = nn.Parameter(proj_emb)
+        self.temperature = nn.Parameter(clipmodel.logit_scale.exp())
+
+        self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
+
+        self.index_class = class_prompts
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x / x.norm(p=2, dim=-1, keepdim=True)
+        return F.linear(x, self._weights) * self.temperature
+
 
 class CLIPWithHead(nn.Module):
-    def __init__(self, config_path: str = 'configs/CLIP_config.yaml') -> None:
+
+    def __init__(self, head: ClipHead, config_path: str = 'configs/CLIP_config.yaml') -> None:
         super().__init__()
         self.CFG = load_config(config_path)
         self.__base_initialization()
         if self.CFG['CLIP']['freeze']:
             self.freeze_base()
-        self.__head_initialization()
-        self.softmax = nn.Softmax(dim=-1)
+        self.head = head
         
     def __base_initialization(self):
-        self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
-        self.base = CLIPVisionModel.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
 
-    def __head_initialization(self):
-        self.head = nn.Sequential(nn.ReLU(),
-                                  nn.Linear(self.CFG['CLIP']['latent_dim'], self.CFG['Head']['out_dim']))
-    
+        clipmodel = CLIPModel.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
+        self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
+
+        self.vision_model = clipmodel.vision_model
+        self.visual_projection = clipmodel.visual_projection
+
     def freeze_base(self):
-        for param in self.base.parameters():
+        for param in self.parameters():
             param.requires_grad = False
 
-    def proces_input(self, image):
-        return self.processor(images=image, return_tensors="pt", padding=True)
+    def proces_input(self, image: torch.Tensor) ->  torch.Tensor:
+        return self.processor(images=image, return_tensors="pt", padding=True)['pixel_values']
 
-    def forward(self, image):
-        clip_outputs = self.base(**self.proces_input(image)) # keys: ['last_hidden_state', 'pooler_outputs']
-        logits = self.head(clip_outputs.pooler_output)
-        return {'logits': logits, 'probabilities': self.softmax(logits)}
-        
-    def example(self):
+    def embed_image(self, image, preprocess=True):
+        """
+        Either embed for classification (few-show) or for zero-shot
+        """
+        if preprocess:
+            image = self.proces_input(image)
+        clip_outputs = self.vision_model(image)
+
+        match self.head.requires_emb_type:
+            case ClipHead.requires_emb_type.CLASSIFICATION:
+                sequence_output = clip_outputs.last_hidden_state
+                return torch.mean(sequence_output[:, 1:, :], dim=1)
+            case ClipHead.requires_emb_type.ZEROSHOT:
+                emb = clip_outputs.pooler_output
+                proj_emb = self.visual_projection(emb)
+                proj_emb /= proj_emb.norm(p=2, dim=-1, keepdim=True)
+                return proj_emb
+            case _:
+                raise NotImplementedError
+
+    def forward(self, x, preprocess=True):
+        x = self.embed_image(x, preprocess=preprocess)
+        logits = self.head(x)
+        return logits
+    
+    def predict_class(self, x, preprocess=True) -> list[str]:
+        logits = self.forward(x, preprocess=preprocess)
+        return [self.head.index_class[i] for i in logits.argmax(dim=1)]
+    
+    @staticmethod
+    def get_example_image():
         url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        image = Image.open(requests.get(url, stream=True).raw)
-        return self.forward(image=image)
+        return Image.open(requests.get(url, stream=True).raw)
+
+    @classmethod
+    def with_classification_head(cls, classes: list[str], config_path: str = 'configs/CLIP_config.yaml'):
+        return cls(LinearHead(classes, config_path))
+    
+    @classmethod
+    def with_zeroshot_head(cls, class_prompts: list[str], config_path: str = 'configs/CLIP_config.yaml'):
+        return cls(ZeroShotHead(class_prompts, config_path))
+
+
+if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+
+    img = CLIPWithHead.get_example_image()
+    class_prompts = [f"An image of a {obj}" for obj in ['cat', 'dog', 'car']]
+
+    classification_head = LinearHead(class_prompts)
+    print('Classification emb shape', CLIPWithHead(classification_head).embed_image(img).shape)
+
+    zero_shot_head = ZeroShotHead(class_prompts)
+
+    predicted_prompt = CLIPWithHead(zero_shot_head).eval().predict_class(img)
+    plt.imshow(img)
+    plt.title(predicted_prompt)
+    plt.show()
