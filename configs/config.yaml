@@ -1,3 +1,7 @@
 data:
   raw_path: data/
   annotations_path: data/annotations
+  data_split:
+    train: 0.7
+    val: 0.1
+    test: 0.2
