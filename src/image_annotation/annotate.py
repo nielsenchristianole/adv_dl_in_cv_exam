@@ -1,16 +1,17 @@
 import os
 from os import PathLike
-from PIL import Image
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-import tkinter as tk
-from functools import cached_property
 from glob import glob
+from functools import cached_property
 from collections import deque
 
+import numpy as np
+import pandas as pd
+import tkinter as tk
+import matplotlib.pyplot as plt
+from PIL import Image
+
 from src.utils.config import Config
-from src.utils.misc import split_path
+from src.utils.misc import split_path, hash_image_name
 
 
 
@@ -19,7 +20,7 @@ class DatasetAnnotation:
         
         self.data_folder = data_folder
         self.output_csv = output_csv
-        self.columns = ['image', 'path', 'label']
+        self.columns = ['image', 'path', 'label', 'hash']
         self.ignore_patters = ignore_patters or ['**/never/**']
 
         self.key_to_label_map = key_to_label_map or {i: i for i in ['1', '2', '3', '4']}
@@ -42,7 +43,7 @@ class DatasetAnnotation:
         """Append the annotation to the CSV file."""
         # Append the annotation to the CSV file'
         _, image_id, _ = split_path(path)
-        row = [image_id, path, label]
+        row = [image_id, path, label, hash_image_name(image_id)]
         df = pd.DataFrame([row], columns=self.columns)
         df.to_csv(self.output_csv, mode='a', index=False, header=not os.path.exists(self.output_csv))
         self.annotated_set.add(path)
