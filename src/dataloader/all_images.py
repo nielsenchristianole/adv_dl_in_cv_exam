@@ -58,7 +58,7 @@ class AllImageDataset(Dataset):
         return len(self.annotations)
 
     def __getitem__(self, index: int) -> Tuple[Image.Image, torch.Tensor | str]:
-        _, relative_path, label = self.annotations.iloc[index]
+        _, relative_path, label, _hash = self.annotations.iloc[index]
         path = os.path.join(self.root_dir, relative_path)
         image = Image.open(path).convert('RGB')
         image = self.transform(image).to(self.device)

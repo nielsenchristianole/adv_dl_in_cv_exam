@@ -1,14 +1,22 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from transformers import CLIPImageProcessor, CLIPModel, AutoTokenizer
+import os
 import requests
-from PIL import Image
-from src.utils.misc import load_config
-import pdb
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional
+
+import numpy as np
+from PIL import Image
+from sklearn.decomposition import PCA
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from transformers import CLIPImageProcessor, CLIPModel, AutoTokenizer
+
+from src.utils.misc import load_config
+from src.utils.config import Config
+from src.dataloader.encodings import EncodedDataset, load_whole_dataset
 
 
 class EmbType(Enum):
@@ -74,6 +82,48 @@ class ZeroShotHead(ClipHead):
         x = x / x.norm(p=2, dim=-1, keepdim=True)
         return F.linear(x, self._weights) * self.temperature
 
+
+class PCAReducedHead(ClipHead):
+
+    def __init__(self, classes: list[str], pca_emb_dim: Optional[int]=None, config_path: str = 'configs/CLIP_config.yaml') -> None:
+        super().__init__()
+        self.emb_dim = load_config(config_path)['CLIP']['latent_dim']
+        self.cfg = Config('configs/config.yaml')
+
+        self._pca_emb_dim = pca_emb_dim
+        self.requires_emb_type = ClipHead.requires_emb_type.CLASSIFICATION
+        self.head = nn.Linear(self._pca_emb_dim or self.emb_dim, len(classes))
+
+        self.index_class = classes
+    
+    def fit_pca(self, csv_name: Optional[str]=None) -> 'PCAReducedHead':
+        encodings: np.ndarray = load_whole_dataset(csv_name or 'all_wanted_images.csv').detach().cpu().numpy()
+        mean = encodings.mean(axis=0, keepdims=True)
+        encodings -= mean
+        std = encodings.std(axis=0, keepdims=True)
+        encodings /= std
+
+        self.pca = PCA().fit(encodings)
+        
+        self.mean = nn.Parameter(torch.from_numpy(mean), requires_grad=False)
+        self.std = nn.Parameter(torch.from_numpy(std), requires_grad=False)
+        self.components = nn.Parameter(torch.from_numpy(self.pca.components_), requires_grad=False)
+        return self
+    
+    def change_pca_emb_dim(self, pca_emb_dim: int) -> 'PCAReducedHead':
+        self._pca_emb_dim = pca_emb_dim
+        self.head = nn.Linear(pca_emb_dim, len(self.index_class))
+        return self
+    
+    def embed_pca(self, x: torch.Tensor) -> torch.Tensor:
+        x = x - self.mean
+        x /= self.std
+        return F.linear(x, weight=self.components[:(self._pca_emb_dim or self.components.shape[0])])
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.embed_pca(x)
+        return self.head(x)
+        
 
 class CLIPWithHead(nn.Module):
 
@@ -153,12 +203,14 @@ if __name__ == '__main__':
     img = CLIPWithHead.get_example_image()
     class_prompts = [f"An image of a {obj}" for obj in ['cat', 'dog', 'car']]
 
-    classification_head = LinearHead(class_prompts)
-    print('Classification emb shape', CLIPWithHead(classification_head).embed_image(img).shape)
+    model = PCAReducedHead(class_prompts).fit_pca()
+    print(model(torch.randn(1, 768)))
 
-    zero_shot_head = ZeroShotHead(class_prompts)
+    model = CLIPWithHead.with_classification_head(class_prompts)
+    print('Classification emb shape', model.embed_image(img).shape)
 
-    predicted_prompt = CLIPWithHead(zero_shot_head).eval().predict_class(img)
+    model = CLIPWithHead.with_zeroshot_head(class_prompts).eval()
+    predicted_prompt = model.predict_class(img)
     plt.imshow(img)
     plt.title(predicted_prompt)
     plt.show()

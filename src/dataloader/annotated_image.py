@@ -10,8 +10,10 @@ import torch
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
+from src.dataloader.base_class import PaintingDataset
 
-class AnnotatedImageDataset(Dataset):
+
+class AnnotatedImageDataset(PaintingDataset):
     def __init__(
         self,
         csv_file: PathLike,
@@ -19,27 +21,19 @@ class AnnotatedImageDataset(Dataset):
         transform: Optional[transforms.Compose] = None,
         device: torch.device = torch.device('cpu')
     ) -> None:
+        super().__init__(csv_file, root_dir, device)
         
-        self.annotations = pd.read_csv(csv_file)
-        self.root_dir = root_dir
         if transform is None:
             transform = transforms.Compose([transforms.Resize((224, 224)),
                                            transforms.ToTensor()])
         self.transform = transform
-        self.label_to_index = {label: i for i, label in enumerate(np.unique(self.annotations['label']))}
-        self.index_to_label = list(self.label_to_index.keys())
-        self.device = device
 
-    def __len__(self) -> int:
-        return len(self.annotations)
-
-    def __getitem__(self, index: int) -> Tuple[Image.Image, torch.Tensor]:
-        _, relative_path, label = self.annotations.iloc[index]
+    def get_x(self, index: int) -> torch.Tensor:
+        _, relative_path, _, _ = self.annotations.iloc[index]
         path = os.path.join(self.root_dir, relative_path)
         image = Image.open(path).convert('RGB')
         image = self.transform(image).to(self.device)
-        label = torch.tensor(self.label_to_index[label]).to(self.device)
-        return (image, label)
+        return image
 
 
 if __name__ == "__main__":
