@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from src.models.CLIP import CLIPWithHead
 from src.utils.config import Config
 from src.dataloader.all_images import AllImageDataset
-from src.utils.misc import image_path_to_endocing_path
+from src.utils.misc import image_path_to_encoding_path
 
 
 @torch.no_grad()
@@ -26,7 +26,7 @@ def main(classes: list[str] = ['1', '2', '3', '4']):
     for images, paths in tqdm.tqdm(data_loader):
         encodings = model.embed_image(images).cpu().numpy()
         for rel_path, encoding in zip(paths, encodings):
-            encoding_path = image_path_to_endocing_path(rel_path)
+            encoding_path = image_path_to_encoding_path(rel_path)
             path = os.path.join(data_folder, encoding_path)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             np.save(path, encoding)
