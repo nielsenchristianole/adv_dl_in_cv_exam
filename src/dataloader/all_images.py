@@ -12,7 +12,7 @@ import torch
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
-from src.utils.misc import split_path
+from src.utils.misc import split_path, hash_image_name
 
 
 class AllImageDataset(Dataset):
@@ -37,12 +37,12 @@ class AllImageDataset(Dataset):
             label_to_set[label] = label_set
         label_to_set['default'] = default_set
 
-        self.annotations = pd.DataFrame(columns=['image', 'path', 'label'])
+        self.annotations = pd.DataFrame(columns=['image', 'path', 'label', 'hash'])
 
         for label, label_set in label_to_set.items():
             for path in label_set:
                 _, image_id, _ = split_path(path)
-                self.annotations.loc[len(self.annotations)] = [image_id, path, label]
+                self.annotations.loc[len(self.annotations)] = [image_id, path, label, hash_image_name(image_id)]
         
         self.root_dir = root_dir
         if transform is None:
