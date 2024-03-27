@@ -18,7 +18,7 @@ def main(classes: list[str] = ['1', '2', '3', '4']):
     data_folder = cfg.get('data', 'raw_path')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = CLIPWithHead.with_classification_head(classes).to(device).eval()
+    model = CLIPWithHead.with_zeroshot_head(classes).to(device).eval()
     
     dataset = AllImageDataset(data_folder, use_relative_path_as_label=True, device=device)
     data_loader = DataLoader(dataset, batch_size=32)
