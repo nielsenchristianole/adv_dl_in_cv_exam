@@ -97,7 +97,7 @@ class PCAReducedHead(ClipHead):
         self.index_class = classes
     
     def fit_pca(self, csv_name: Optional[str]=None) -> 'PCAReducedHead':
-        encodings: np.ndarray = load_whole_dataset(csv_name or 'all_wanted_images.csv').detach().cpu().numpy()
+        encodings: np.ndarray = load_whole_dataset(csv_name or 'all_wanted_images.csv')[0].detach().cpu().numpy()
         mean = encodings.mean(axis=0, keepdims=True)
         encodings -= mean
         std = encodings.std(axis=0, keepdims=True)
