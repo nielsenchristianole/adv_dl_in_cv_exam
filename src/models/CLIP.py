@@ -97,7 +97,7 @@ class PCAReducedHead(ClipHead):
         self.index_class = classes
     
     def fit_pca(self, csv_name: Optional[str]=None) -> 'PCAReducedHead':
-        encodings: np.ndarray = load_whole_dataset(csv_name or 'all_wanted_images.csv').detach().cpu().numpy()
+        encodings: np.ndarray = load_whole_dataset(csv_name or 'all_wanted_images.csv')[0].detach().cpu().numpy()
         mean = encodings.mean(axis=0, keepdims=True)
         encodings -= mean
         std = encodings.std(axis=0, keepdims=True)
@@ -105,14 +105,14 @@ class PCAReducedHead(ClipHead):
 
         self.pca = PCA().fit(encodings)
         
-        self.mean = nn.Parameter(torch.from_numpy(mean), requires_grad=False)
-        self.std = nn.Parameter(torch.from_numpy(std), requires_grad=False)
-        self.components = nn.Parameter(torch.from_numpy(self.pca.components_), requires_grad=False)
+        self.mean = nn.Parameter(torch.from_numpy(mean), requires_grad=False).to(self.head.weight.device)
+        self.std = nn.Parameter(torch.from_numpy(std), requires_grad=False).to(self.head.weight.device)
+        self.components = nn.Parameter(torch.from_numpy(self.pca.components_), requires_grad=False).to(self.head.weight.device)
         return self
     
     def change_pca_emb_dim(self, pca_emb_dim: int) -> 'PCAReducedHead':
         self._pca_emb_dim = pca_emb_dim
-        self.head = nn.Linear(pca_emb_dim, len(self.index_class))
+        self.head = nn.Linear(pca_emb_dim, len(self.index_class)).to(self.head.weight.device)
         return self
     
     def embed_pca(self, x: torch.Tensor) -> torch.Tensor:

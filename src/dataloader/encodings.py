@@ -14,14 +14,23 @@ from src.utils.misc import image_path_to_encoding_path
 from src.dataloader.base_class import PaintingDataset
 
 
-def load_whole_dataset(csv_name: Optional[str]) -> torch.Tensor:
+def load_whole_dataset(
+    csv_name: Optional[str],
+    device: torch.device=torch.device('cpu'),
+    splits: list[str]=['train']) -> tuple[torch.Tensor, torch.Tensor]:
     cfg = Config('configs/config.yaml')
 
     csv = os.path.join(cfg.get('data', 'annotations_path'), csv_name or 'all_wanted_images.csv')
-    dataset = EncodedDataset(csv, cfg.get('data', 'raw_path'))
+    dataset = EncodedDataset(csv, cfg.get('data', 'raw_path')).get_dataset_subset(splits)
     dataloader = DataLoader(dataset, batch_size=128, shuffle=False)
-    encodings = torch.concat([e for e, l in dataloader])
-    return encodings
+    encodings = list()
+    labels = list()
+    for e, l in dataloader:
+        encodings.append(e)
+        labels.append(l)
+    encodings = torch.concat(encodings, dim=0)
+    labels = torch.concat(labels, dim=0)
+    return encodings.to(device), labels.to(device)
 
 
 class EncodedDataset(PaintingDataset):
