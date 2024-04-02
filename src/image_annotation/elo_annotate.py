@@ -171,7 +171,7 @@ class ELOAnnotate:
         result is the result of the match, 1 if the first image won, 0 if the second image won.
         """
         # write the names to the matches file
-        with open(self.out_matches_path, 'a') as f:
+        with open(self.out_matches_path, 'a') as f: 
             f.write(f"{name1},{name2},{result}\n")
         
         path1, rating1, games1, discard1 = self.annotations[name1]
@@ -289,13 +289,15 @@ class ELOAnnotate:
                 self._update_elo(self.tmp_name1, self.tmp_name2, 1)
             case '2':
                 self._update_elo(self.tmp_name1, self.tmp_name2, 0)
+            case '3':
+                self._update_elo(self.tmp_name1, self.tmp_name2, 0.5)
             case 'q':
                 print("Escape key pressed, closing and saving")
                 plt.close('all')
             case _:
                 print("Invalid key pressed: ", event.key)
         
-        if event.key in ['1', '2', 'q']:
+        if event.key in ['1', '2', '3','q']:
             self._update_display()
                 
     def annotate(self):
