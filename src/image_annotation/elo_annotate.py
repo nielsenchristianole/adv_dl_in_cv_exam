@@ -6,7 +6,7 @@ from PIL import Image
 
 import matplotlib
 # use a backend that supports interactive mode
-matplotlib.use('TkAgg')
+# matplotlib.use('TkAgg')
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -174,8 +174,11 @@ class ELOAnnotate:
         with open(self.out_matches_path, 'a') as f: 
             f.write(f"{name1},{name2},{result}\n")
         
-        path1, rating1, games1, discard1 = self.annotations[name1]
-        path2, rating2, games2, discard2 = self.annotations[name2]
+        _, rating1, games1, discard1 = self.annotations[name1]
+        _, rating2, games2, discard2 = self.annotations[name2]
+
+        path1 = self.data_path / name1
+        path2 = self.data_path / name2
         
         expected1 = 1 / (1 + 10 ** ((rating1 - rating2) / 400))
         expected2 = 1 - expected1
@@ -233,9 +236,12 @@ class ELOAnnotate:
         self.tmp_name1 = name1
         self.tmp_name2 = name2
 
-        path1, _, games1, _ = self.annotations[name1]
-        path2, _, games2, _ = self.annotations[name2]
-        
+        _, _, games1, _ = self.annotations[name1]
+        _, _, games2, _ = self.annotations[name2]
+
+        path1 = self.data_path / name1
+        path2 = self.data_path / name2
+
         def display(ax, path: Path, games):
             
             ax.clear()

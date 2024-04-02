@@ -36,3 +36,9 @@ clean:
 
 annotate:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/image_annotation/annotate.py
+
+annotate-corners:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/image_annotation/corner_annotate.py
+
+annotate-elo:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/image_annotation/elo_annotate.py
