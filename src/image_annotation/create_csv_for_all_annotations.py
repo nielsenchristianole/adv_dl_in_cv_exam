@@ -1,5 +1,5 @@
 import os
-from os import PathLike
+from typing import Optional, List
 from glob import glob
 
 import numpy as np
@@ -9,8 +9,8 @@ from src.utils.config import Config
 from src.utils.misc import split_path, hash_image_name
 
 
-def main() -> None:
-    exclude_search_strings = ['**/never/**']
+def main(exclude_search_strings: Optional[List[str]]=None) -> None:
+    exclude_search_strings = ['**/never/**'] if exclude_search_strings is None else exclude_search_strings
     columns = ['image', 'path', 'label', 'hash']
 
     cfg = Config('configs/config.yaml')

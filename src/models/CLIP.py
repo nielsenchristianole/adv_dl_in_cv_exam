@@ -96,8 +96,22 @@ class PCAReducedHead(ClipHead):
 
         self.index_class = classes
     
-    def fit_pca(self, csv_name: Optional[str]=None) -> 'PCAReducedHead':
-        encodings: np.ndarray = load_whole_dataset(csv_name or 'all_wanted_images.csv')[0].detach().cpu().numpy()
+    def fit_pca(self, csv_name: Optional[str]=None, splits: Optional[list[str]]=None) -> 'PCAReducedHead':
+        """
+        Fit PCA on the whole dataset, from csv_name. Optionally filter by splits.
+
+        If no csv_name is provided, it will use the 'all_wanted_images.csv' file.
+        If this does not exist, it will create it.
+        """
+        if csv_name is None:
+            csv_name = 'all_wanted_images.csv'
+            _path = os.path.join(self.cfg.get('data', 'annotations_path'), csv_name)
+            if not os.path.exists(_path):
+                # This will create the csv file
+                from src.image_annotation.create_csv_for_all_annotations import main as create_all_wanted_images_csv
+                create_all_wanted_images_csv()
+
+        encodings: np.ndarray = load_whole_dataset(csv_name, splits=splits)[0].detach().cpu().numpy()
         mean = encodings.mean(axis=0, keepdims=True)
         encodings -= mean
         std = encodings.std(axis=0, keepdims=True)
