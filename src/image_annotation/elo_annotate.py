@@ -2,9 +2,8 @@
 
 from pathlib import Path
 from functools import cached_property, cache
-from PIL import Image
 
-import matplotlib
+import ast
 # use a backend that supports interactive mode
 # matplotlib.use('TkAgg')
 
@@ -68,9 +67,9 @@ class ELOAnnotate:
         
         games = []
         for path in self._all_paths:
-            name = path.name
+            name = path.stem
             if name not in annotations:
-                annotations[name] = (path, 1000, 0, False)
+                annotations[name] = (path.relative_to('data'), 1000, 0, False)
                 games.append(0)
             else:
                 self.total_games += annotations[name][2]/2
@@ -84,6 +83,10 @@ class ELOAnnotate:
     def _save_annotations(self):
         """Save the annotations to the csv file."""
         anno_formated = [(name, *values) for name, values in self.annotations.items()]
+        
+        # remove the first part of the path
+        for i, (name, path, elo, games, discard) in enumerate(anno_formated):
+            anno_formated[i] = (name, str(Path(path).relative_to('data')), elo, games, discard)
         
         df = pd.DataFrame(anno_formated)
         df.to_csv(self.out_path, index=False, header=['name', 'path', 'elo', 'games', 'discard'])
@@ -107,7 +110,7 @@ class ELOAnnotate:
         
         if self.only_annotated:
             # get all the key-value pairs where the image has been annotated in the corner annotations
-            annotation_subset = {name: self.annotations[name] for name in corner_annotations['path'].values}
+            annotation_subset = {name: self.annotations[name] for name in corner_annotations['name'].values}
         else:
             annotation_subset = self.annotations
 
@@ -133,15 +136,15 @@ class ELOAnnotate:
         # name2 = min(names[1:], key=lambda name: abs(annotation_subset[name][1] - annotation_subset[name1][1]))
         
         # If name1 and name2 does not exist in the corner annotations, annotate them
-        if name1 not in corner_annotations['path'].values or name2 not in corner_annotations['path'].values:
+        if name1 not in corner_annotations['name'].values or name2 not in corner_annotations['name'].values:
             
             plt.close(self.fig)
             
-            if name1 not in corner_annotations['path'].values:
+            if name1 not in corner_annotations['name'].values:
                 self.corner_annotator.annotate_image(name1)
             while len(plt.get_fignums()) > 0:
                 plt.pause(0.1)
-            if name2 not in corner_annotations['path'].values:
+            if name2 not in corner_annotations['name'].values:
                 self.corner_annotator.annotate_image(name2)
             while len(plt.get_fignums()) > 0:
                 plt.pause(0.1)
@@ -150,8 +153,8 @@ class ELOAnnotate:
 
             corner_annotations = pd.read_csv(self.corner_path)
             
-        corner1 = corner_annotations[corner_annotations['path'] == name1]
-        corner2 = corner_annotations[corner_annotations['path'] == name2]
+        corner1 = corner_annotations[corner_annotations['name'] == name1]
+        corner2 = corner_annotations[corner_annotations['name'] == name2]
         
         if corner1['discard'].values[0] or corner2['discard'].values[0]:
             if corner1['discard'].values[0]:
@@ -205,10 +208,8 @@ class ELOAnnotate:
     
     def _crop_and_wrap(self, img, img_path):
         
-        import ast
-        
         corners = pd.read_csv(self.corner_path)
-        corners = corners[corners['path'] == img_path.name]['corners'].values[0]
+        corners = corners[corners['name'] == img_path.stem]['corners'].values[0]
         corners = np.array(ast.literal_eval(corners))
         
         xmin = corners[:,0].min()
@@ -239,8 +240,8 @@ class ELOAnnotate:
         _, _, games1, _ = self.annotations[name1]
         _, _, games2, _ = self.annotations[name2]
 
-        path1 = self.data_path / name1
-        path2 = self.data_path / name2
+        path1 = self.data_path / (name1 + ".jpg")
+        path2 = self.data_path / (name2 + ".jpg")
 
         def display(ax, path: Path, games):
             
@@ -273,9 +274,9 @@ class ELOAnnotate:
                                     3:  {(self.bin_games[3]/n_images)*100:.1f}%\n \
                                     4:  {(self.bin_games[4]/n_images)*100:.1f}%\n",
                       verticalalignment='top', horizontalalignment='right', fontsize=10)
-        self.fig.text(0.50, 0.98, f"5:  {(self.bin_games[5]/n_images)*100:.1f}%\n \
-                                    6:  {(self.bin_games[6]/n_images)*100:.1f}%\n \
-                                    7+: {(sum(self.bin_games[7:])/n_images)*100:.1f}%\n",
+        self.fig.text(0.50, 0.98, f"5:  {(self.bin_games[5]/n_images)*100:.1f}% ({self.bin_games[5]})\n \
+                                    6:  {(self.bin_games[6]/n_images)*100:.1f}% ({self.bin_games[6]})\n \
+                                    7+: {(sum(self.bin_games[7:])/n_images)*100:.1f}% ({sum(self.bin_games[7:])})\n",
                       verticalalignment='top', horizontalalignment='right', fontsize=10)
         
         self.fig.canvas.draw()
