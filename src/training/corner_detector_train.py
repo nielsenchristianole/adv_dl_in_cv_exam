@@ -1,50 +1,108 @@
 import torch
 from torch.utils.data import DataLoader
 from torchvision.models import resnet18
-from torchvision.transforms import ToTensor
-from lightning import LightningModule, Trainer, loggers
-from corner_detection_loader import CornersDataset
+
+import lightning as L
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
+
+from src.dataloader.corner_detection_loader import CornerDataset
+
+import cv2
+import numpy as np
 
 import torch.nn as nn
 import torch.optim as optim
 
-class CornerDetector(LightningModule):
-    def __init__(self):
+class CornerDetector(L.LightningModule):
+    
+    IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
+    IMAGENET_STD = np.array([0.229, 0.224, 0.225])
+            
+    def __init__(self, scale_to):
         super().__init__()
+        self.scale_to = scale_to
         self.resnet = resnet18(pretrained=True)
-        self.fc = nn.Linear(512, 8)  # 8 outputs for corner coordinates
+        self.resnet.fc = nn.Linear(self.resnet.fc.in_features, 8)
 
     def forward(self, x):
-        x = self.resnet(x)
-        x = self.fc(x)
-        return x
+        return self.resnet(x)
 
     def training_step(self, batch, batch_idx):
         images, targets = batch
         outputs = self(images)
         loss = nn.MSELoss()(outputs, targets)
-        self.log('train_loss', loss)
+        # self.log('train_loss', loss)
+        self._log_predictions(batch, outputs, "train")
         return loss
 
     def validation_step(self, batch, batch_idx):
         images, targets = batch
         outputs = self(images)
         loss = nn.MSELoss()(outputs, targets)
-        self.log('val_loss', loss)
+        self.log('val/loss', loss)
+        self._log_predictions(batch, outputs, "val")
         return loss
 
     def configure_optimizers(self):
         return optim.Adam(self.parameters(), lr=0.001)
+    
+    def _log_predictions(self, batch, outputs, prefix : str):
+        
+        def draw_corners(img, corners, color):
+            corners *= self.scale_to
+            corners = corners.reshape(4, 2)
+            
+            for i in range(len(corners)):
+                cv2.line(img, (int(corners[i, 0]), int(corners[i, 1])), (int(corners[(i+1) % 4, 0]), int(corners[(i+1) % 4, 1])), color, 2)
+                cv2.putText(img, f"{i}", (int(corners[i, 0]), int(corners[i, 1])), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                
+        
+        imgs = batch[0].cpu().numpy()
+        corners_target = batch[1].cpu().numpy()
+        outputs = outputs.cpu().detach().numpy()
+        
+        images = np.zeros_like(imgs)
+        for i, (img, pred, target) in enumerate(zip(imgs, outputs, corners_target)):
+            img = img.transpose(1, 2, 0)
+            
+            img = img * self.IMAGENET_STD + self.IMAGENET_MEAN
+            img = np.clip(img, 0, 1)
+            img = np.ascontiguousarray(img)
+            
+            draw_corners(img, pred, (0, 1, 0))
+            draw_corners(img, target, (1, 0, 0))
+            
+            img = (img * 255).astype(np.uint8)
+            images[i] = img.transpose(2, 0, 1)
+        self.logger.experiment.add_images(f"{prefix}",images.astype(np.uint8), self.current_epoch) # type: ignore
 
 if __name__ == '__main__':
-    train_dataset = CornersDataset(is_train=True, transform=ToTensor())
-    val_dataset = CornersDataset(is_train=False, transform=ToTensor())
+    
+    name = input("Insert name of training:")
+    
+    scale_to = 256
+    batch_size = 16
+    
+    train_dataset = CornerDataset(is_train=True, scale_to=scale_to)
+    val_dataset = CornerDataset(is_train=False, scale_to=scale_to)
+    
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size,
+                            num_workers=4)
 
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=32)
+    corner_detector = CornerDetector(scale_to)
 
-    corner_detector = CornerDetector()
-
-    logger = loggers.TensorBoardLogger('logs', name='corner_detector')
-    trainer = Trainer(logger=logger)
+    checkpoint_callback = ModelCheckpoint(
+        monitor='val/loss',  # The validation metric to monitor
+        dirpath='model_checkpoints',  # Directory where the checkpoints will be saved
+        filename=f"{name}",  # The prefix for the checkpoint file name
+        save_top_k=5,  # Save only the best model
+        mode='min',  # 'min' means that lower 'val_loss' is better
+    )
+    logger = TensorBoardLogger("lightning_logs", name=f"{name}")
+    trainer = L.Trainer(logger=logger,
+                        callbacks=[checkpoint_callback],
+                        log_every_n_steps=1)
     trainer.fit(corner_detector, train_loader, val_loader)

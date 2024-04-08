@@ -7,6 +7,7 @@ import numpy as np
 import ast
 import cv2
 import torch
+import tqdm
 
 from torch.utils.data import Dataset
 
@@ -38,7 +39,8 @@ class CornerDataset(Dataset):
         
         img, corners = self._extract_data(path, corners)
         
-        img, corners = self.augment(img, corners)
+        if self.is_train:
+            img, corners = self.augment(img, corners)
         
         img = self.to0to1(img)
         img = self.standardize(img)
@@ -101,10 +103,6 @@ class CornerDataset(Dataset):
         
         img = cast(np.ndarray, img)
         
-        # scale corners from original image size to scaled image size
-        corners[:, 0] = corners[:, 0] / w * self.scale_to
-        corners[:, 1] = corners[:, 1] / h * self.scale_to
-        
         return img, corners
         
     def _get_paths(self, anno_folder, train_split):
@@ -122,6 +120,15 @@ class CornerDataset(Dataset):
             
         corners = np.array(corners)
         
+        # adjust the corners to the new image size so it can be skipped in the forward pass
+        for corner, path in tqdm.tqdm(zip(corners, all_paths), desc="adjusting corners"):
+            img = cv2.imread("data/" + path)
+            h, w = img.shape[:2]
+            corner[:, 0] = corner[:, 0] / w * self.scale_to
+            corner[:, 1] = corner[:, 1] / h * self.scale_to
+            
+            
+    
         seed = 42
         np.random.seed(seed)
         train_idx = np.random.choice(n_datapoints, int(n_datapoints * train_split), replace=False)
@@ -144,24 +151,31 @@ class CornerDataset(Dataset):
 
 if __name__ == "__main__":
     
-    dataset = CornerDataset()
+    scale_to = 128
+    dataset = CornerDataset(scale_to=scale_to)
     
     print(len(dataset))
     
     import matplotlib.pyplot as plt
-    for i in range(10):
+    for i in range(20):
         img, corners = dataset[i]
         
         img = np.array(img.permute(1, 2, 0))
         
-        corners = corners * 512
+        corners = corners * scale_to
         
         corners = corners.reshape(-1, 2)
         
         img = dataset.unstandardize(img)
+        img = np.clip(img, 0, 1)
         
+        for i in range(len(corners)):
+            # plot lines between corners
+            cv2.line(img, (int(corners[i, 0]), int(corners[i, 1])), (int(corners[(i+1) % 4, 0]), int(corners[(i+1) % 4, 1])), (0, 0, 255), 2)
+            # plot labels on corners
+            cv2.putText(img, f"{i}", (int(corners[i, 0]), int(corners[i, 1])), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
         plt.imshow(img)
-        plt.scatter(corners[:, 0], corners[:, 1])
+        # plt.scatter(corners[:, 0], corners[:, 1])
         plt.show()
         plt.title(f"test img {i} out of 10")
         
