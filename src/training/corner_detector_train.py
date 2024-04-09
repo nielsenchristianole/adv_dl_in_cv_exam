@@ -19,7 +19,7 @@ class CornerDetector(L.LightningModule):
     IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
     IMAGENET_STD = np.array([0.229, 0.224, 0.225])
             
-    def __init__(self, scale_to):
+    def __init__(self, scale_to = 256):
         super().__init__()
         self.scale_to = scale_to
         self.resnet = resnet18(pretrained=True)
@@ -82,15 +82,15 @@ if __name__ == '__main__':
     name = input("Insert name of training:")
     
     scale_to = 256
-    batch_size = 16
+    batch_size = 32
     
     train_dataset = CornerDataset(is_train=True, scale_to=scale_to)
     val_dataset = CornerDataset(is_train=False, scale_to=scale_to)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                              num_workers=4)
+                              num_workers=15, pin_memory=True, persistent_workers=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size,
-                            num_workers=4)
+                            num_workers=15, pin_memory=True, persistent_workers=True)
 
     corner_detector = CornerDetector(scale_to)
 

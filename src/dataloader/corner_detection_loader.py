@@ -112,6 +112,11 @@ class CornerDataset(Dataset):
         all_paths = annotations['path']
         corners_raw = annotations['corners']
         
+        # remove all paths and corners that has "discard"== True
+        discard = annotations['discard']
+        all_paths = all_paths[discard == False]
+        corners_raw = corners_raw[discard == False]
+        
         n_datapoints = len(all_paths)
         
         corners = []
@@ -120,14 +125,20 @@ class CornerDataset(Dataset):
             
         corners = np.array(corners)
         
-        # adjust the corners to the new image size so it can be skipped in the forward pass
-        for corner, path in tqdm.tqdm(zip(corners, all_paths), desc="adjusting corners"):
-            img = cv2.imread("data/" + path)
-            h, w = img.shape[:2]
-            corner[:, 0] = corner[:, 0] / w * self.scale_to
-            corner[:, 1] = corner[:, 1] / h * self.scale_to
-            
-            
+        import concurrent.futures
+
+        def adjust_corners(self, corners, all_paths):
+            def adjust_corner(corner, path):
+                img = cv2.imread("data/" + path)
+                h, w = img.shape[:2]
+                corner[:, 0] = corner[:, 0] / w * self.scale_to
+                corner[:, 1] = corner[:, 1] / h * self.scale_to
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [executor.submit(adjust_corner, corner, path) for corner, path in zip(corners, all_paths)]
+                concurrent.futures.wait(futures)
+                
+        adjust_corners(self, corners, all_paths)
     
         seed = 42
         np.random.seed(seed)
