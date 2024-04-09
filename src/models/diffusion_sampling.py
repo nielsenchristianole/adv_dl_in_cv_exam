@@ -1,3 +1,5 @@
+# Code taken from: https://github.com/crowsonkb/v-diffusion-pytorch
+
 import torch
 from tqdm.auto import trange
 
