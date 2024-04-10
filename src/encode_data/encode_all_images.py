@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import tqdm
 import numpy as np
@@ -8,19 +9,19 @@ from torch.utils.data import DataLoader
 
 from src.models.CLIP import CLIPWithHead
 from src.utils.config import Config
-from src.dataloader.all_images import AllImageDataset
+from src.dataloader.annotated_image import AnnotatedImageDataset
 from src.utils.misc import image_path_to_encoding_path
 
 
 @torch.no_grad()
-def main(classes: list[str] = ['1', '2', '3', '4']):
+def main(device: Optional[torch.device]=None):
     cfg = Config('configs/config.yaml')
     data_folder = cfg.get('data', 'raw_path')
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = CLIPWithHead.with_zeroshot_head(classes).to(device).eval()
+    device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = CLIPWithHead.with_zeroshot_head('class').to(device).eval()
     
-    dataset = AllImageDataset(data_folder, use_relative_path_as_label=True, device=device)
+    dataset = AnnotatedImageDataset.all_image_dataset(device=device)
     data_loader = DataLoader(dataset, batch_size=32)
 
     for images, paths in tqdm.tqdm(data_loader):
@@ -33,4 +34,6 @@ def main(classes: list[str] = ['1', '2', '3', '4']):
 
 
 if __name__ == "__main__":
-    main()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    main(device)
