@@ -47,7 +47,7 @@ class LinearHead(ClipHead):
         emb_dim = load_config(config_path)['CLIP']['latent_dim']
         self.head = nn.Linear(emb_dim, len(classes))
 
-        self.requires_emb_type = ClipHead.requires_emb_type.CLASSIFICATION
+        self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
 
         self.index_class = classes
         
@@ -91,7 +91,7 @@ class PCAReducedHead(ClipHead):
         self.cfg = Config('configs/config.yaml')
 
         self._pca_emb_dim = pca_emb_dim
-        self.requires_emb_type = ClipHead.requires_emb_type.CLASSIFICATION
+        self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
         self.head = nn.Linear(self._pca_emb_dim or self.emb_dim, len(classes))
 
         self.index_class = classes
@@ -217,8 +217,8 @@ if __name__ == '__main__':
     img = CLIPWithHead.get_example_image()
     class_prompts = [f"An image of a {obj}" for obj in ['cat', 'dog', 'car']]
 
-    model = PCAReducedHead(class_prompts).fit_pca()
-    print(model(torch.randn(1, 768)))
+    model = PCAReducedHead(class_prompts).fit_pca(splits=['train'])
+    print(model(torch.randn(1, 512)))
 
     model = CLIPWithHead.with_classification_head(class_prompts)
     print('Classification emb shape', model.embed_image(img).shape)
