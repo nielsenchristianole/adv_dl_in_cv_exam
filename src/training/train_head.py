@@ -1,8 +1,9 @@
 import os
-from typing import Optional
+from typing import Optional, Literal
 from copy import deepcopy
 
 import tqdm
+import tyro
 from sklearn.model_selection import KFold
 
 import torch
@@ -15,21 +16,6 @@ from src.dataloader.encodings import EncodedDataset
 from src.models.CLIP import ZeroShotHead
 from src.utils.config import Config
 from src.dataloader.encodings import load_whole_dataset
-
-
-NUM_CLASSES = 4
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-CSV_NAME = 'christian.csv'
-LR = 1e-3
-N_SPLITS = 5
-
-
-classes =  NUM_CLASSES * ['This is a picture of a painting'] # classes is used to get a prior for the L2 regularization
-base_model = ZeroShotHead(classes).to(DEVICE)
-get_optimizer = lambda model: optim.Adam(model.parameters(), lr=LR)
-
-
-X_all, y_all = load_whole_dataset(CSV_NAME, DEVICE, splits=['train', 'val'])
 
 
 class CustomCriterion(nn.Module):
@@ -47,14 +33,7 @@ class CustomCriterion(nn.Module):
         return loss + self._lambda * l2_reg
 
 
-def get_model() -> ZeroShotHead:
-    model = deepcopy(base_model)
-    model._weights.requires_grad = True
-    model.temperature.requires_grad = True
-    return model
-
-
-def fit(model: nn.Module, X_train: torch.Tensor, y_train: torch.Tensor, optimizer: optim.Optimizer, criterion: nn.Module, min_grad: float=1e-3) -> None:
+def fit(model: nn.Module, optimizer: optim.Optimizer, X_train: torch.Tensor, y_train: torch.Tensor, criterion: nn.Module, min_grad: float=1e-3) -> None:
     
     pbar = tqdm.tqdm(desc='Training', leave=False)
     model.train()
@@ -88,19 +67,44 @@ def evaluate(model: nn.Module, X_val: torch.Tensor, y_val: torch.Tensor, criteri
     return loss.item(), accuracy
 
 
-K_folds = KFold(n_splits=N_SPLITS, shuffle=True)
-losses = list()
-accuracies = list()
-criterion = CustomCriterion(base_model=base_model)
-for split, (train_idx, val_idx) in tqdm.tqdm(enumerate(K_folds.split(X_all, y_all)), desc='Cross-validation', total=N_SPLITS):
-    X_train, y_train = X_all[train_idx], y_all[train_idx]
-    X_val, y_val = X_all[val_idx], y_all[val_idx]
+def main(
+    csv_name: str,
+    num_classes: int=4,
+    device: Optional[Literal['cpu', 'cuda']]=None,
+    lr: float=1e-3,
+    n_splits: int=5
+) -> None:
+    
+    device = torch.device(device or ('cuda' if torch.cuda.is_available() else 'cpu'))
 
-    model = get_model()
-    optimizer = get_optimizer(model)
+    classes =  num_classes * ['This is a picture of a painting'] # classes is used to get a prior for the L2 regularization
+    base_model = ZeroShotHead(classes).to(device)
 
-    fit(model, X_all, y_all, optimizer, criterion)
-    loss, accuracy = evaluate(model, X_val, y_val, criterion)
-    losses.append(loss)
-    accuracies.append(accuracy)
-    print(f'Split {split}: Loss: {loss}, Accuracy: {accuracy}')
+    def get_model() -> ZeroShotHead:
+        model = deepcopy(base_model)
+        model._weights.requires_grad = True
+        model.temperature.requires_grad = True
+        return model
+
+    X_all, y_all = load_whole_dataset(csv_name, device, splits=['train', 'val'])
+
+    K_folds = KFold(n_splits=n_splits, shuffle=True)
+    losses = list()
+    accuracies = list()
+    criterion = CustomCriterion(base_model=base_model)
+    for split, (train_idx, val_idx) in tqdm.tqdm(enumerate(K_folds.split(X_all, y_all)), desc='Cross-validation', total=n_splits):
+        X_train, y_train = X_all[train_idx], y_all[train_idx]
+        X_val, y_val = X_all[val_idx], y_all[val_idx]
+
+        model = get_model()
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+
+        fit(model, optimizer, X_train, y_train, criterion)
+        loss, accuracy = evaluate(model, X_val, y_val, criterion)
+        losses.append(loss)
+        accuracies.append(accuracy)
+        print(f'Split {split}: Loss: {loss}, Accuracy: {accuracy}')
+
+
+if __name__ == '__main__':
+    tyro.cli(main)
