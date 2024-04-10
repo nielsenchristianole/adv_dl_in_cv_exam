@@ -21,7 +21,7 @@ def load_whole_dataset(
     cfg = Config('configs/config.yaml')
 
     csv = os.path.join(cfg.get('data', 'annotations_path'), csv_name or 'all_wanted_images.csv')
-    dataset = EncodedDataset(csv, cfg.get('data', 'raw_path')).get_dataset_subset(splits)
+    dataset = EncodedDataset(csv, cfg.get('data', 'raw_path')).get_dataset_split_subset(splits)
     dataloader = DataLoader(dataset, batch_size=128, shuffle=False)
     encodings = list()
     labels = list()
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     csv_path = os.path.join(ann_folder, f"{csv_name}.csv")
 
     dataset = EncodedDataset(csv_file=csv_path, root_dir=data_folder)
-    partial_dataset = dataset.get_dataset_subset('train')
+    partial_dataset = dataset.get_dataset_split_subset('train')
     dataloader = DataLoader(dataset, batch_size=9, shuffle=True)
 
     images, labels = next(iter(dataloader))
