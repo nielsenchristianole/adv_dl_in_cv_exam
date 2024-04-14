@@ -13,7 +13,6 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from src.utils.config import Config
-from src.utils.misc import image_path_to_encoding_path
 
 
 class PaintingDataset(Dataset, ABC):
@@ -28,8 +27,9 @@ class PaintingDataset(Dataset, ABC):
         self.annotations = pd.read_csv(csv_file)
         self.root_dir = root_dir
 
-        self.label_to_index = {label: i for i, label in enumerate(np.unique(self.annotations['label']))}
-        self.index_to_label = list(self.label_to_index.keys())
+        if 'label' in self.annotations.columns:
+            self.label_to_index = {label: i for i, label in enumerate(np.unique(self.annotations['label']))}
+            self.index_to_label = list(self.label_to_index.keys())
         self.device = device
 
     def __len__(self) -> int:
