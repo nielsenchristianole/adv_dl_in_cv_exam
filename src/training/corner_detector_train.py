@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from torchvision.models import resnet18
+from torchvision.models import resnet18, mobilenet_v3_small
 
 import lightning as L
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -21,27 +21,38 @@ class CornerDetector(L.LightningModule):
             
     def __init__(self, scale_to = 256):
         super().__init__()
+        self.save_hyperparameters()
+        
         self.scale_to = scale_to
-        self.resnet = resnet18(pretrained=True)
-        self.resnet.fc = nn.Linear(self.resnet.fc.in_features, 8)
+        
+        self.mobile_net = mobilenet_v3_small(pretrained=True)
+        last_channel = self.mobile_net.classifier[-1].in_features
+        self.mobile_net.classifier[-1] = nn.Linear(last_channel, 8)
 
     def forward(self, x):
-        return self.resnet(x)
+        return self.mobile_net(x)
 
     def training_step(self, batch, batch_idx):
         images, targets = batch
         outputs = self(images)
-        loss = nn.MSELoss()(outputs, targets)
-        # self.log('train_loss', loss)
-        self._log_predictions(batch, outputs, "train")
+        
+        loss = nn.MSELoss()(outputs[:-1], targets[:-1])
+        
+        if batch_idx == 0:
+            self.log('train/loss', loss)
+            self._log_predictions(batch, outputs, "train")
         return loss
 
     def validation_step(self, batch, batch_idx):
         images, targets = batch
         outputs = self(images)
-        loss = nn.MSELoss()(outputs, targets)
-        self.log('val/loss', loss)
-        self._log_predictions(batch, outputs, "val")
+        
+        loss = nn.MSELoss()(outputs[:-1], targets[:-1])
+        
+        if batch_idx <= 10:
+            self.log('val/loss', loss)
+            self._log_predictions(batch, outputs, "val")
+            
         return loss
 
     def configure_optimizers(self):
@@ -82,15 +93,15 @@ if __name__ == '__main__':
     name = input("Insert name of training:")
     
     scale_to = 256
-    batch_size = 32
+    batch_size = 16
     
     train_dataset = CornerDataset(is_train=True, scale_to=scale_to)
     val_dataset = CornerDataset(is_train=False, scale_to=scale_to)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                              num_workers=15, pin_memory=True, persistent_workers=True)
+                              num_workers=5, pin_memory=True, persistent_workers=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size,
-                            num_workers=15, pin_memory=True, persistent_workers=True)
+                            num_workers=3, pin_memory=True, persistent_workers=True)
 
     corner_detector = CornerDetector(scale_to)
 
