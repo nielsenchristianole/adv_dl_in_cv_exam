@@ -56,7 +56,8 @@ class AnnotatedImageDataset(PaintingDataset):
         csv_file: Optional[str]=None,
         splits: Optional[list[str]]=None,
         transform: Optional[transforms.Compose] = None,
-        device: torch.device = torch.device('cpu')
+        device: torch.device = torch.device('cpu'),
+        exclude_never: bool = True
     ) -> 'AnnotatedImageDataset':
         cfg = Config('configs/config.yaml')
 
@@ -80,7 +81,8 @@ class AnnotatedImageDataset(PaintingDataset):
         this.index_to_label = None
         this.label_to_index = None
         
-        this.annotations = this.annotations[this.annotations['path'].apply(lambda x: 'never' not in x)].reset_index(drop=True)
+        if exclude_never:
+            this.annotations = this.annotations[this.annotations['path'].apply(lambda x: 'never' not in x)].reset_index(drop=True)
 
         return this
 
