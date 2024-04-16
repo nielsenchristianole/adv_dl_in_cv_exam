@@ -1,4 +1,5 @@
 data:
+  base_path: data
   raw_path: data/raw/imgs
   annotations_path: data/annotations
   elo_annotations_path: data/elo_annotations
