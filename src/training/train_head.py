@@ -36,7 +36,6 @@ def get_model() -> ZeroShotHead:
     global base_model
     model = deepcopy(base_model)
     model._weights.requires_grad = True
-    model.temperature.requires_grad = True
     return model
 
 

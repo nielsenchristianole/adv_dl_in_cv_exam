@@ -71,8 +71,7 @@ class ZeroShotHead(ClipHead):
         proj_emb = clipmodel.text_projection(emb)
         proj_emb /= proj_emb.norm(p=2, dim=-1, keepdim=True)
 
-        self._weights = nn.Parameter(proj_emb)
-        self.temperature = nn.Parameter(clipmodel.logit_scale.exp())
+        self._weights = nn.Parameter(proj_emb * clipmodel.logit_scale.exp())
 
         self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
 
@@ -80,7 +79,7 @@ class ZeroShotHead(ClipHead):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x / x.norm(p=2, dim=-1, keepdim=True)
-        return F.linear(x, self._weights) * self.temperature
+        return F.linear(x, self._weights)
 
 
 class PCAReducedHead(ClipHead):
