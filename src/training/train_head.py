@@ -1,6 +1,7 @@
 import os
 from copy import deepcopy
 from typing import Optional, Literal
+from pathlib import Path
 
 import tqdm
 import matplotlib.pyplot as plt
@@ -98,8 +99,10 @@ def train(
     y_test: torch.Tensor,
     optimizer: Optimizer,
     criterion: nn.Module,
-    num_epochs: int = 10_000,
-) -> None:
+    num_epochs: int,
+    save_best: bool = False,
+    early_stopping: Optional[int] = None
+) -> tuple[float, float]:
     model.train()
 
     train_losses = list()
@@ -111,6 +114,9 @@ def train(
 
     global min_grad_global
     global update_plot_cycle_global
+
+    best_accuracy = -float('inf')
+    last_best_epoch = 0
 
     for epoch in (pbar := tqdm.trange(num_epochs, desc='Training', leave=False)):
 
@@ -125,6 +131,18 @@ def train(
 
             train_loss, train_accuracy = eval(model=model, X=X_train, y=y_train, criterion=criterion)
             val_loss, val_accuracy = eval(model=model, X=X_test, y=y_test, criterion=criterion)
+            
+            if val_accuracy > best_accuracy:
+                best_accuracy = val_accuracy
+                last_best_epoch = epoch
+                if save_best:
+                    global output_path_global
+                    torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_best'))
+                if (early_stopping is not None) and \
+                   (epoch - last_best_epoch > early_stopping):
+                    pbar.close()
+                    break
+            
             model.train()
 
             train_losses.append(train_loss)
@@ -146,6 +164,8 @@ def train(
             if grad_norm < min_grad_global:
                 pbar.close()
                 break
+
+    return min(validation_losses), min(validation_accuracies)
 
 
 @torch.no_grad()
@@ -172,15 +192,18 @@ def main(
     device: Optional[Literal['cuda', 'cpu']] = None,
     output_path: str = 'models/head.pth',
     head_type: ClipHeadTypes = ClipHeadTypes['linear'],
-    data_folder = 'data/wikiart_encodings'
+    root_dir: str = 'data/wikiart_encodings',
+    early_stopping: Optional[int] = 10_000,
 ) -> None:
 
     global min_grad_global
     global update_plot_cycle_global
     global base_model
+    global output_path_global
     
     min_grad_global = min_grad
     update_plot_cycle_global = update_plot_cycle
+    output_path_global = Path(output_path)
 
     # load data
     cfg = Config('configs/config.yaml')
@@ -188,7 +211,7 @@ def main(
 
     csv_path = os.path.join(ann_folder, csv_name)
 
-    dataset = EncodedDataset(csv_file=csv_path, root_dir=data_folder)
+    dataset = EncodedDataset(csv_file=csv_path, root_dir=root_dir)
     train_splits = ['train', 'val'] if test_csv_name is None else ['train', 'val', 'test']
     dataloader = DataLoader(dataset.get_dataset_split_subset(train_splits), shuffle=True)
     data = list(dataloader)
@@ -218,7 +241,7 @@ def main(
             model = get_model()
             optimizer = Adam(model.parameters(), lr=lr)
 
-            train(
+            loss, accuracy = train(
                 model=model,
                 X_train=X_train,
                 y_train=y_train,
@@ -226,10 +249,10 @@ def main(
                 y_test=y_test,
                 optimizer=optimizer,
                 criterion=criterion,
-                num_epochs=num_epochs
+                num_epochs=num_epochs,
+                early_stopping=early_stopping
             )
 
-            loss, accuracy = eval(model=model, X=X_test, y=y_test, criterion=criterion)
             gen_losses[idx] += loss * len(test_index) / len(train_index)
             gen_accuracies[idx] += accuracy * len(test_index) / len(train_index)
 
@@ -240,7 +263,7 @@ def main(
     criterion = CustomCriterion(_lambda=best_lambda, base_model=base_model)
 
     if test_csv_name is not None:
-        dataset = EncodedDataset(csv_file=os.path.join(ann_folder, test_csv_name), root_dir=data_folder)
+        dataset = EncodedDataset(csv_file=os.path.join(ann_folder, test_csv_name), root_dir=root_dir)
         dataloader = DataLoader(dataset)
     else:
         dataloader = DataLoader(dataset.get_dataset_split_subset('test'))
@@ -256,7 +279,9 @@ def main(
         y_test=y_test,
         optimizer=optimizer,
         criterion=criterion,
-        num_epochs=num_epochs
+        num_epochs=num_epochs,
+        save_best=True,
+        early_stopping=early_stopping
     )
 
     test_loss, test_accuracy = eval(model=model, X=X_test, y=y_test, criterion=criterion)
@@ -268,7 +293,8 @@ def main(
     print(f'Final train loss: {train_loss}')
     print(f'Final train accuracy: {train_accuracy}')
 
-    torch.save(model.state_dict(), output_path)
+    # set output path with _last suffix
+    torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_last'))
 
 
 
