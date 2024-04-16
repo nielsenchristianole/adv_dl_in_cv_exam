@@ -12,27 +12,28 @@ import torch.nn.functional as F
 from torch.optim import Adam, Optimizer
 from torch.utils.data import DataLoader
 
-from src.models.CLIP import ZeroShotHead
+from src.models.CLIP import ClipHead, ClipHeadTypes
 from src.utils.config import Config
 from src.dataloader.encodings import EncodedDataset
 
 
 class CustomCriterion(nn.Module):
 
-    def __init__(self, _lambda: float = 1e-1, base_model: Optional[ZeroShotHead]=None) -> None:
+    def __init__(self, _lambda: float = 1e-1, base_model: Optional[ClipHead]=None) -> None:
         super().__init__()
 
         self._lambda = _lambda
         self.cross_entropy = nn.CrossEntropyLoss()
-        self.prior = base_model._weights if base_model else None
+        # self.prior = base_model._weights if base_model else None
+        self.prior = None
 
-    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, model: Optional[ZeroShotHead]=None) -> torch.Tensor:
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, model: Optional[ClipHead]=None) -> torch.Tensor:
         loss = self.cross_entropy(y_pred, y_true)
         l2_reg = F.mse_loss(model._weights, self.prior if self.prior is not None else 0) if model is not None else 0
         return loss + self._lambda * l2_reg
 
 
-def get_model() -> ZeroShotHead:
+def get_model() -> ClipHead:
     global base_model
     model = deepcopy(base_model)
     model._weights.requires_grad = True
@@ -94,7 +95,7 @@ def train(
     y_test: torch.Tensor,
     optimizer: Optimizer,
     criterion: nn.Module,
-    num_epochs: int = 10_000
+    num_epochs: int = 10_000,
 ) -> None:
     model.train()
 
@@ -156,15 +157,17 @@ def eval(*, model: nn.Module, X: torch.Tensor, y: torch.Tensor, criterion: nn.Mo
 
 
 def main(
+    *,
     lr: float = 1e-3,
     cv_splits: int = 5,
-    min_grad: float = 1e-5,
-    update_plot_cycle: int = 100,
+    min_grad: float = 1e-4,
+    update_plot_cycle: int = 10,
     num_epochs: int = 100_000,
     lambdas: list[float] = [1e-1, 1e-2, 1e-3, 1e-4],
     csv_name: str = 'calle2.csv',
     device: Optional[Literal['cuda', 'cpu']] = None,
-    output_path: str = 'models/head.pth'
+    output_path: str = 'models/head.pth',
+    head_type: ClipHeadTypes = ClipHeadTypes['linear']
 ):
     global min_grad_global
     global update_plot_cycle_global
@@ -191,7 +194,7 @@ def main(
 
     num_classes = len(torch.unique(y))
 
-    base_model = ZeroShotHead(num_classes * ['This is a picture of a painting']).to(device)
+    base_model = head_type.value(num_classes * ['This is a picture of a painting']).to(device)
 
     cross_validation = KFold(n_splits=cv_splits, shuffle=True)
 
