@@ -3,6 +3,7 @@ import requests
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional
+from typing import TypedDict
 
 import numpy as np
 from PIL import Image
@@ -27,6 +28,7 @@ class EmbType(Enum):
 class ClipHead(nn.Module, ABC):
     requires_emb_type = EmbType
     index_class: list[str]
+    _weights: torch.Tensor
 
     def __init__(self) -> None:
         super().__init__()
@@ -47,7 +49,9 @@ class LinearHead(ClipHead):
         emb_dim = load_config(config_path)['CLIP']['latent_dim']
         self.head = nn.Linear(emb_dim, len(classes))
 
-        self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
+        self._weights = self.head.weight
+
+        self.requires_emb_type = ClipHead.requires_emb_type.CLASSIFICATION
 
         self.index_class = classes
         
@@ -92,6 +96,8 @@ class PCAReducedHead(ClipHead):
         self._pca_emb_dim = pca_emb_dim
         self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
         self.head = nn.Linear(self._pca_emb_dim or self.emb_dim, len(classes))
+
+        self._weights = self.head.weight
 
         self.index_class = classes
     
@@ -138,6 +144,12 @@ class PCAReducedHead(ClipHead):
         return self.head(x)
         
 
+class ClipHeadTypes(Enum):
+    linear: LinearHead = LinearHead
+    zeroshot: ZeroShotHead = ZeroShotHead
+    pca: PCAReducedHead = PCAReducedHead
+
+
 class CLIPWithHead(nn.Module):
 
     def __init__(self, head: ClipHead, config_path: str = 'configs/CLIP_config.yaml') -> None:
@@ -151,7 +163,7 @@ class CLIPWithHead(nn.Module):
     def __base_initialization(self):
 
         clipmodel = CLIPModel.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
-        self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
+        self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'], do_rescale=False)
 
         self.vision_model = clipmodel.vision_model
         self.visual_projection = clipmodel.visual_projection
