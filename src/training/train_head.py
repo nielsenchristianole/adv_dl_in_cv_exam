@@ -167,12 +167,14 @@ def main(
     update_plot_cycle: int = 10,
     num_epochs: int = 100_000,
     lambdas: list[float] = [1e-1, 1e-2, 1e-3, 1e-4],
-    csv_name: str = 'calle2.csv',
+    csv_name: str = 'wikiart_train.csv',
+    test_csv_name: Optional[str] = 'wikiart_test.csv',
     device: Optional[Literal['cuda', 'cpu']] = None,
     output_path: str = 'models/head.pth',
     head_type: ClipHeadTypes = ClipHeadTypes['linear'],
-    data_folder = CFG.get('data', 'encoded_path')
-):
+    data_folder = 'data/wikiart_encodings'
+) -> None:
+
     global min_grad_global
     global update_plot_cycle_global
     global base_model
@@ -187,7 +189,8 @@ def main(
     csv_path = os.path.join(ann_folder, csv_name)
 
     dataset = EncodedDataset(csv_file=csv_path, root_dir=data_folder)
-    dataloader = DataLoader(dataset.get_dataset_split_subset(['train', 'val']), shuffle=True)
+    train_splits = ['train', 'val'] if test_csv_name is None else ['train', 'val', 'test']
+    dataloader = DataLoader(dataset.get_dataset_split_subset(train_splits), shuffle=True)
     data = list(dataloader)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else torch.device(device)
@@ -236,7 +239,11 @@ def main(
     optimizer = Adam(model.parameters(), lr=lr)
     criterion = CustomCriterion(_lambda=best_lambda, base_model=base_model)
 
-    dataloader = DataLoader(dataset.get_dataset_split_subset('test'))
+    if test_csv_name is not None:
+        dataset = EncodedDataset(csv_file=os.path.join(ann_folder, test_csv_name), root_dir=data_folder)
+        dataloader = DataLoader(dataset)
+    else:
+        dataloader = DataLoader(dataset.get_dataset_split_subset('test'))
     test_data = list(dataloader)
     X_test = torch.concat([d[0] for d in test_data]).to(torch.float).to(device)
     y_test = torch.concat([d[1] for d in test_data]).to(torch.long).to(device)
