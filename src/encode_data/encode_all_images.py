@@ -20,7 +20,7 @@ def main(device: Optional[torch.device]=None):
     encoding_folder = Path(cfg.get('data', 'encoded_path'))
 
     device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = CLIPWithHead.with_zeroshot_head('class').to(device).eval()
+    model = CLIPWithHead.with_classification_head('class').to(device).eval()
     
     dataset = AnnotatedImageDataset.all_image_dataset(
         csv_file=Path(cfg.get('data', 'elo_annotations_path')) / 'corners.csv',
