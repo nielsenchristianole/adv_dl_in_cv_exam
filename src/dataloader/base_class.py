@@ -27,7 +27,9 @@ class PaintingDataset(Dataset, ABC):
         self.annotations = pd.read_csv(csv_file)
         self.root_dir = root_dir
 
-        if 'label' in self.annotations.columns:
+        self.use_labels = 'label' in self.annotations.columns
+
+        if self.use_labels:
             self.label_to_index = {label: i for i, label in enumerate(np.unique(self.annotations['label']))}
             self.index_to_label = list(self.label_to_index.keys())
         self.device = device
@@ -41,6 +43,8 @@ class PaintingDataset(Dataset, ABC):
     
     def get_y(self, index: int) -> Any:
         """How to read the target"""
+        if not self.use_labels:
+            return torch.tensor(0).to(self.device)
         img_id, relative_path, label, _hash = self.annotations.iloc[index]
         label = torch.tensor(self.label_to_index[label]).to(self.device)
         return label
