@@ -17,6 +17,8 @@ from src.utils.config import Config
 from src.dataloader.encodings import EncodedDataset
 
 
+CFG = Config('configs/config.yaml')
+
 class CustomCriterion(nn.Module):
 
     def __init__(self, _lambda: float = 1e-1, base_model: Optional[ClipHead]=None) -> None:
@@ -74,6 +76,7 @@ def update_plot(
     ax.legend(loc='lower left')
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Accuracy')
+    ax.axhline(1, color='k', linestyle='--', alpha=0.5)
 
     ax = fig.add_subplot(3, 1, 3)
     ax.set_title('Gradient Norm')
@@ -167,7 +170,8 @@ def main(
     csv_name: str = 'calle2.csv',
     device: Optional[Literal['cuda', 'cpu']] = None,
     output_path: str = 'models/head.pth',
-    head_type: ClipHeadTypes = ClipHeadTypes['linear']
+    head_type: ClipHeadTypes = ClipHeadTypes['linear'],
+    data_folder = CFG.get('data', 'encoded_path')
 ):
     global min_grad_global
     global update_plot_cycle_global
@@ -178,7 +182,6 @@ def main(
 
     # load data
     cfg = Config('configs/config.yaml')
-    data_folder = cfg.get('data', 'encoded_path')
     ann_folder = cfg.get('data', 'annotations_path')
 
     csv_path = os.path.join(ann_folder, csv_name)
