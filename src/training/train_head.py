@@ -22,24 +22,30 @@ CFG = Config('configs/config.yaml')
 
 class CustomCriterion(nn.Module):
 
-    def __init__(self, _lambda: float = 1e-1, base_model: Optional[ClipHead]=None) -> None:
+    def __init__(self, _lambda: float = 1e-1, base_model: Optional[ClipHead]=None, use_non_zero_prior: bool=False) -> None:
         super().__init__()
 
         self._lambda = _lambda
         self.cross_entropy = nn.CrossEntropyLoss()
-        # self.prior = base_model._weights if base_model else None
-        self.prior = None
+        self.prior = base_model
+        self.use_non_zero_prior = use_non_zero_prior
 
-    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, model: Optional[ClipHead]=None) -> torch.Tensor:
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor, model: ClipHead) -> torch.Tensor:
         loss = self.cross_entropy(y_pred, y_true)
-        l2_reg = F.mse_loss(model._weights, self.prior if self.prior is not None else 0) if model is not None else 0
-        return loss + self._lambda * l2_reg
+        if self.use_non_zero_prior and self.prior is not None:
+            l2_reg = 0
+            for p1, p2 in zip(model.parameters(), self.prior.parameters()):
+                l2_reg += (p1 - p2).square().sum()
+        else:
+            l2_reg = 0
+            for p in model.parameters():
+                l2_reg += p.square().sum()
+        return loss + self._lambda * l2_reg.sqrt()
 
 
 def get_model() -> ClipHead:
     global base_model
-    model = deepcopy(base_model)
-    model._weights.requires_grad = True
+    model = deepcopy(base_model).train()
     return model
 
 
@@ -57,8 +63,13 @@ def update_plot(
     train_accuracies: list[float],
     validation_accuracies: list[float],
     grad_norms: list[float],
-    epochs: list[int]
+    epochs: list[int],
+    save: bool = False
 ) -> None:
+    
+    global show_plot_global
+    if not show_plot_global or not save:
+        return
 
     fig = plt.figure('training')
     fig.clear()
@@ -86,8 +97,14 @@ def update_plot(
     ax.set_ylabel('Gradient Norm')
     ax.set_yscale('log')
 
-    fig.tight_layout()
-    drawnow()
+    if save is not None:
+        global output_path_global
+        save_path = output_path_global.with_suffix('.pdf')
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    if show_plot_global:
+        fig.tight_layout()
+        drawnow()
 
 
 def train(
@@ -116,41 +133,52 @@ def train(
     global update_plot_cycle_global
 
     best_accuracy = -float('inf')
+    best_loss = float('inf')
     last_best_epoch = 0
 
-    for epoch in (pbar := tqdm.trange(num_epochs, desc='Training', leave=False)):
+    for epoch in (pbar := tqdm.trange(num_epochs, desc='Training', leave=save_best)):
 
         optimizer.zero_grad()
         outputs = model(X_train)
-        loss: torch.Tensor = criterion(outputs, y_train)
+        loss: torch.Tensor = criterion(outputs, y_train, model)
         loss.backward()
         optimizer.step()
 
         if epoch % update_plot_cycle_global == 0:
-            grad_norm = torch.norm(torch.stack([torch.norm(p.grad) for p in model.parameters()]), p=2)
+            grad_norm = torch.norm(torch.stack([torch.norm(p.grad) for p in model.parameters()]), p=2).item()
 
             train_loss, train_accuracy = eval(model=model, X=X_train, y=y_train, criterion=criterion)
             val_loss, val_accuracy = eval(model=model, X=X_test, y=y_test, criterion=criterion)
-            
-            if val_accuracy > best_accuracy:
-                best_accuracy = val_accuracy
-                last_best_epoch = epoch
-                if save_best:
-                    global output_path_global
-                    torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_best'))
-                if (early_stopping is not None) and \
-                   (epoch - last_best_epoch > early_stopping):
-                    pbar.close()
-                    break
-            
-            model.train()
 
+            pbar.set_postfix(
+                Tloss=train_loss,
+                Vloss=val_loss,
+                Tacc=train_accuracy,
+                Vacc=val_accuracy,
+                grad=grad_norm
+            )
+            
             train_losses.append(train_loss)
             validation_losses.append(val_loss)
             train_accuracies.append(train_accuracy)
             validation_accuracies.append(val_accuracy)
-            grad_norms.append(grad_norm.item())
+            grad_norms.append(grad_norm)
             epochs.append(epoch)
+
+            # if val_accuracy > best_accuracy:
+            if val_loss < best_loss:
+                best_accuracy = val_accuracy
+                best_loss = val_loss
+                last_best_epoch = epoch
+                if save_best:
+                    global output_path_global
+                    torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_best'))
+            if (early_stopping is not None) and \
+                (epoch - last_best_epoch > early_stopping):
+                pbar.close()
+                break
+            
+            model.train()
 
             update_plot(
                 train_losses=train_losses,
@@ -164,6 +192,16 @@ def train(
             if grad_norm < min_grad_global:
                 pbar.close()
                 break
+    
+    update_plot(
+        train_losses=train_losses,
+        validation_losses=validation_losses,
+        train_accuracies=train_accuracies,
+        validation_accuracies=validation_accuracies,
+        grad_norms=grad_norms,
+        epochs=epochs,
+        save=save_best
+    )
 
     return min(validation_losses), min(validation_accuracies)
 
@@ -173,7 +211,7 @@ def eval(*, model: nn.Module, X: torch.Tensor, y: torch.Tensor, criterion: nn.Mo
     model.eval()
     
     out: torch.Tensor = model(X)
-    loss: torch.Tensor = criterion(out, y)
+    loss: torch.Tensor = criterion(out, y, model)
     accuracy = (out.argmax(dim=1) == y).float().mean()
     
     return loss.item(), accuracy.item()
@@ -181,29 +219,35 @@ def eval(*, model: nn.Module, X: torch.Tensor, y: torch.Tensor, criterion: nn.Mo
 
 def main(
     *,
-    lr: float = 1e-3,
+    lr: float = 5e-3,
     cv_splits: int = 5,
-    min_grad: float = 1e-4,
-    update_plot_cycle: int = 10,
+    min_grad: float = 0,
+    update_plot_cycle: int = 100,
     num_epochs: int = 100_000,
-    lambdas: list[float] = [1e-1, 1e-2, 1e-3, 1e-4],
+    lambdas: list[float] = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1],
     csv_name: str = 'wikiart_train.csv',
     test_csv_name: Optional[str] = 'wikiart_test.csv',
     device: Optional[Literal['cuda', 'cpu']] = None,
     output_path: str = 'models/head.pth',
     head_type: ClipHeadTypes = ClipHeadTypes['linear'],
     root_dir: str = 'data/wikiart_encodings',
-    early_stopping: Optional[int] = 10_000,
+    early_stopping: Optional[int] = 2_000,
+    show_plot: bool = False
 ) -> None:
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else torch.device(device)
+    print(f'Using device: {device}')
 
     global min_grad_global
     global update_plot_cycle_global
     global base_model
     global output_path_global
+    global show_plot_global
     
     min_grad_global = min_grad
     update_plot_cycle_global = update_plot_cycle
     output_path_global = Path(output_path)
+    show_plot_global = show_plot
 
     # load data
     cfg = Config('configs/config.yaml')
@@ -216,7 +260,6 @@ def main(
     dataloader = DataLoader(dataset.get_dataset_split_subset(train_splits), shuffle=True)
     data = list(dataloader)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else torch.device(device)
 
     X = torch.concat([d[0] for d in data]).to(torch.float).to(device)
     y = torch.concat([d[1] for d in data]).to(torch.long).to(device)
@@ -227,7 +270,7 @@ def main(
 
     cross_validation = KFold(n_splits=cv_splits, shuffle=True)
 
-    for train_index, test_index in tqdm.tqdm(cross_validation.split(X), desc='Outer CV', total=cv_splits):
+    for train_index, test_index in tqdm.tqdm(cross_validation.split(X), desc='Folds', total=cv_splits):
         
         X_train, X_test = X[train_index], X[test_index]
         y_train, y_test = y[train_index], y[test_index]
@@ -236,7 +279,7 @@ def main(
         gen_losses = len(lambdas) * [0]
         gen_accuracies = len(lambdas) * [0]
 
-        for idx, _lambda in enumerate(lambdas):
+        for idx, _lambda in enumerate(tqdm.tqdm(lambdas, desc='Models', leave=False)):
             criterion = CustomCriterion(_lambda=_lambda, base_model=base_model)
             model = get_model()
             optimizer = Adam(model.parameters(), lr=lr)
@@ -271,6 +314,8 @@ def main(
     X_test = torch.concat([d[0] for d in test_data]).to(torch.float).to(device)
     y_test = torch.concat([d[1] for d in test_data]).to(torch.long).to(device)
 
+    print(f'Best lambda: {best_lambda}')
+
     train(
         model=model,
         X_train=X,
@@ -287,11 +332,15 @@ def main(
     test_loss, test_accuracy = eval(model=model, X=X_test, y=y_test, criterion=criterion)
     train_loss, train_accuracy = eval(model=model, X=X, y=y, criterion=criterion)
 
-    print(f'Best lambda: {best_lambda}')
-    print(f'Final test loss: {test_loss}')
-    print(f'Final test accuracy: {test_accuracy}')
-    print(f'Final train loss: {train_loss}')
-    print(f'Final train accuracy: {train_accuracy}')
+    msg = (f'Best lambda: {best_lambda}\n'
+           f'Final test loss: {test_loss}\n'
+           f'Final test accuracy: {test_accuracy}\n'
+           f'Final train loss: {train_loss}\n'
+           f'Final train accuracy: {train_accuracy}')
+    print(msg)
+
+    with open(output_path_global.with_suffix('.txt'), 'w') as f:
+        f.write(msg)
 
     # set output path with _last suffix
     torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_last'))
