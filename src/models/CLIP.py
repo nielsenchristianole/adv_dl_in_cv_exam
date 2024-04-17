@@ -49,7 +49,7 @@ class LinearHead(ClipHead):
         emb_dim = load_config(config_path)['CLIP']['latent_dim']
         self.head = nn.Linear(emb_dim, len(classes))
 
-        self._weights = self.head.weight
+        # self._weights = self.head.weight
 
         self.requires_emb_type = ClipHead.requires_emb_type.CLASSIFICATION
 
@@ -97,7 +97,7 @@ class PCAReducedHead(ClipHead):
         self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
         self.head = nn.Linear(self._pca_emb_dim or self.emb_dim, len(classes))
 
-        self._weights = self.head.weight
+        # self._weights = self.head.weight
 
         self.index_class = classes
     
