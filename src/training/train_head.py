@@ -224,7 +224,7 @@ def train(
         save=save_best # update plot and save
     )
 
-    return min(validation_losses), min(validation_accuracies)
+    return min(validation_losses), max(validation_accuracies)
 
 
 @torch.no_grad()
@@ -296,6 +296,8 @@ def main(
     gen_losses = len(lambdas) * [0]
     gen_accuracies = len(lambdas) * [0]
 
+    total_datapoints = len(y)
+
     # k-fold cross-validation
     for train_index, test_index in tqdm.tqdm(cross_validation.split(X), desc='Folds', total=cv_splits):
         
@@ -323,7 +325,7 @@ def main(
             )
 
             # update generalization metrics
-            metric_weights = len(test_index) / len(train_index)
+            metric_weights = len(test_index) / total_datapoints
             gen_losses[idx] += loss * metric_weights
             gen_accuracies[idx] += accuracy * metric_weights
 
