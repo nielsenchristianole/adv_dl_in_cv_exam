@@ -7,6 +7,7 @@ from tabulate import tabulate
 import tqdm
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
+from sklearn.metrics import confusion_matrix
 
 import torch
 import torch.nn as nn
@@ -243,19 +244,20 @@ def eval(*, model: nn.Module, X: torch.Tensor, y: torch.Tensor, criterion: nn.Mo
 def main(
     *,
     lr: float = 5e-3, # learning rate
-    cv_splits: int = 3, # number of cross-validation splits
+    cv_splits: int = 5, # number of cross-validation splits
     min_grad: float = 0, # minimum gradient norm to stop training
     update_plot_cycle: int = 100, # update plot and metrics every n epochs
     num_epochs: int = 100_000, # maximum number of epochs
-    lambdas: list[float] = [0, 100],#, 1e-4, 1e-3, 1e-2, 1e-1, 1], # l2-regularization values (differnt models)
+    lambdas: list[float] = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2], # l2-regularization values (differnt models)
     csv_name: str = 'wikiart_train.csv', # training annotations file
     test_csv_name: Optional[str] = 'wikiart_test.csv', # test annotations file, if None, use the test split from the training annotations
     device: Optional[Literal['cuda', 'cpu']] = None, # device to use
     output_path: str = 'models/head.pth', # output path for the model
     head_type: ClipHeadTypes = ClipHeadTypes['linear'], # which head to use
     root_dir: str = 'data/wikiart_encodings', # where to find the encodings
-    early_stopping: Optional[int] = 5_000, # early stopping if no improvement after n epochs
-    show_plot: bool = False # show the training plot while training
+    early_stopping: Optional[int] = 1500, # early stopping if no improvement after n epochs
+    show_plot: bool = False, # show the training plot while training
+    mode: Literal['train', 'eval'] = 'eval' # train or evaluate the model
 ) -> None:
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else torch.device(device)
@@ -300,7 +302,8 @@ def main(
 
     # k-fold cross-validation
     for train_index, test_index in tqdm.tqdm(cross_validation.split(X), desc='Folds', total=cv_splits):
-        
+        if mode == 'eval':
+            break
         # split data
         X_train, X_test = X[train_index], X[test_index]
         y_train, y_test = y[train_index], y[test_index]
@@ -349,19 +352,23 @@ def main(
     X_test = torch.concat([d[0] for d in test_data]).to(torch.float).to(device)
     y_test = torch.concat([d[1] for d in test_data]).to(torch.long).to(device)
 
-    # train the best model
-    train(
-        model=model,
-        X_train=X,
-        y_train=y,
-        X_test=X_test,
-        y_test=y_test,
-        optimizer=optimizer,
-        criterion=criterion,
-        num_epochs=num_epochs,
-        save_best=True,
-        early_stopping=early_stopping
-    )
+    if mode == 'train':
+        # train the best model
+        train(
+            model=model,
+            X_train=X,
+            y_train=y,
+            X_test=X_test,
+            y_test=y_test,
+            optimizer=optimizer,
+            criterion=criterion,
+            num_epochs=num_epochs,
+            save_best=True,
+            early_stopping=early_stopping
+        )
+    elif mode == 'eval':
+        # load the best model
+        model.load_state_dict(torch.load(output_path_global.with_stem(output_path_global.stem + '_best')))
 
     # evaluate the model
     test_loss, test_accuracy = eval(model=model, X=X_test, y=y_test, criterion=criterion)
@@ -375,11 +382,23 @@ def main(
            f'Final train accuracy: {train_accuracy}')
     print(msg)
 
-    with open(output_path_global.with_suffix('.txt'), 'w') as f:
-        f.write(msg)
+    if mode == 'train':
+        with open(output_path_global.with_suffix('.txt'), 'w') as f:
+            f.write(msg)
 
-    torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_last'))
+        torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_last'))
 
+    # confusion matrix
+    model.eval()
+    y_pred = model(X_test).argmax(dim=1)
+    cm = confusion_matrix(y_test.cpu(), y_pred.cpu(), normalize='true')
+    plt.figure()
+    plt.imshow(cm, cmap='viridis')
+    plt.colorbar()
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.title('Confusion Matrix')
+    plt.savefig(output_path_global.with_stem(output_path_global.stem + '_cm').with_suffix('.pdf'), dpi=300, bbox_inches='tight')
 
 
 if __name__ == '__main__':
