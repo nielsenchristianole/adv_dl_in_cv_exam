@@ -2,6 +2,7 @@ import os
 from copy import deepcopy
 from typing import Optional, Literal
 from pathlib import Path
+from tabulate import tabulate
 
 import tqdm
 import matplotlib.pyplot as plt
@@ -21,6 +22,11 @@ from src.dataloader.encodings import EncodedDataset
 CFG = Config('configs/config.yaml')
 
 class CustomCriterion(nn.Module):
+    """
+    Cross entropy loss with l2-regularization.
+
+    If use_non_zero_prior is True, the prior model is used to compute the l2-regularization.
+    """
 
     def __init__(self, _lambda: float = 1e-1, base_model: Optional[ClipHead]=None, use_non_zero_prior: bool=False) -> None:
         super().__init__()
@@ -44,6 +50,7 @@ class CustomCriterion(nn.Module):
 
 
 def get_model() -> ClipHead:
+    """Return a new model instance."""
     global base_model
     model = deepcopy(base_model).train()
     return model
@@ -66,6 +73,8 @@ def update_plot(
     epochs: list[int],
     save: bool = False
 ) -> None:
+    """Update the training plot. If save is True, save the plot.
+    if show_plot is False, do not compute the plot."""
     
     global show_plot_global
     if not show_plot_global or not save:
@@ -122,6 +131,7 @@ def train(
 ) -> tuple[float, float]:
     model.train()
 
+    # init tracked vals
     train_losses = list()
     validation_losses = list()
     train_accuracies = list()
@@ -132,12 +142,14 @@ def train(
     global min_grad_global
     global update_plot_cycle_global
 
+    # track best values
     best_accuracy = -float('inf')
     best_loss = float('inf')
     last_best_epoch = 0
 
     for epoch in (pbar := tqdm.trange(num_epochs, desc='Training', leave=save_best)):
 
+        # forward pass
         optimizer.zero_grad()
         outputs = model(X_train)
         loss: torch.Tensor = criterion(outputs, y_train, model)
@@ -145,11 +157,16 @@ def train(
         optimizer.step()
 
         if epoch % update_plot_cycle_global == 0:
+            # compute metrics
+
+            # used for early stopping
             grad_norm = torch.norm(torch.stack([torch.norm(p.grad) for p in model.parameters()]), p=2).item()
 
+            # evaluate model
             train_loss, train_accuracy = eval(model=model, X=X_train, y=y_train, criterion=criterion)
             val_loss, val_accuracy = eval(model=model, X=X_test, y=y_test, criterion=criterion)
 
+            # update progress bar with metrics
             pbar.set_postfix(
                 Tloss=train_loss,
                 Vloss=val_loss,
@@ -158,6 +175,7 @@ def train(
                 grad=grad_norm
             )
             
+            # save metrics for plotting
             train_losses.append(train_loss)
             validation_losses.append(val_loss)
             train_accuracies.append(train_accuracy)
@@ -165,16 +183,19 @@ def train(
             grad_norms.append(grad_norm)
             epochs.append(epoch)
 
-            # if val_accuracy > best_accuracy:
-            if val_loss < best_loss:
+            # check if best model
+            if val_accuracy > best_accuracy:
+            # if val_loss < best_loss:
                 best_accuracy = val_accuracy
                 best_loss = val_loss
                 last_best_epoch = epoch
                 if save_best:
+                    # save model
                     global output_path_global
                     torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_best'))
             if (early_stopping is not None) and \
                 (epoch - last_best_epoch > early_stopping):
+                # early stopping
                 pbar.close()
                 break
             
@@ -200,7 +221,7 @@ def train(
         validation_accuracies=validation_accuracies,
         grad_norms=grad_norms,
         epochs=epochs,
-        save=save_best
+        save=save_best # update plot and save
     )
 
     return min(validation_losses), min(validation_accuracies)
@@ -208,6 +229,8 @@ def train(
 
 @torch.no_grad()
 def eval(*, model: nn.Module, X: torch.Tensor, y: torch.Tensor, criterion: nn.Module) -> tuple[float, float]:
+    """Evaluate the model on the given data."""
+
     model.eval()
     
     out: torch.Tensor = model(X)
@@ -219,20 +242,20 @@ def eval(*, model: nn.Module, X: torch.Tensor, y: torch.Tensor, criterion: nn.Mo
 
 def main(
     *,
-    lr: float = 5e-3,
-    cv_splits: int = 5,
-    min_grad: float = 0,
-    update_plot_cycle: int = 100,
-    num_epochs: int = 100_000,
-    lambdas: list[float] = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1],
-    csv_name: str = 'wikiart_train.csv',
-    test_csv_name: Optional[str] = 'wikiart_test.csv',
-    device: Optional[Literal['cuda', 'cpu']] = None,
-    output_path: str = 'models/head.pth',
-    head_type: ClipHeadTypes = ClipHeadTypes['linear'],
-    root_dir: str = 'data/wikiart_encodings',
-    early_stopping: Optional[int] = 2_000,
-    show_plot: bool = False
+    lr: float = 5e-3, # learning rate
+    cv_splits: int = 3, # number of cross-validation splits
+    min_grad: float = 0, # minimum gradient norm to stop training
+    update_plot_cycle: int = 100, # update plot and metrics every n epochs
+    num_epochs: int = 100_000, # maximum number of epochs
+    lambdas: list[float] = [0, 100],#, 1e-4, 1e-3, 1e-2, 1e-1, 1], # l2-regularization values (differnt models)
+    csv_name: str = 'wikiart_train.csv', # training annotations file
+    test_csv_name: Optional[str] = 'wikiart_test.csv', # test annotations file, if None, use the test split from the training annotations
+    device: Optional[Literal['cuda', 'cpu']] = None, # device to use
+    output_path: str = 'models/head.pth', # output path for the model
+    head_type: ClipHeadTypes = ClipHeadTypes['linear'], # which head to use
+    root_dir: str = 'data/wikiart_encodings', # where to find the encodings
+    early_stopping: Optional[int] = 5_000, # early stopping if no improvement after n epochs
+    show_plot: bool = False # show the training plot while training
 ) -> None:
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if device is None else torch.device(device)
@@ -249,7 +272,7 @@ def main(
     output_path_global = Path(output_path)
     show_plot_global = show_plot
 
-    # load data
+    # load data into single tensor
     cfg = Config('configs/config.yaml')
     ann_folder = cfg.get('data', 'annotations_path')
 
@@ -260,30 +283,33 @@ def main(
     dataloader = DataLoader(dataset.get_dataset_split_subset(train_splits), shuffle=True)
     data = list(dataloader)
 
-
     X = torch.concat([d[0] for d in data]).to(torch.float).to(device)
     y = torch.concat([d[1] for d in data]).to(torch.long).to(device)
 
     num_classes = len(torch.unique(y))
 
+    # use the selected model head
     base_model = head_type.value(num_classes * ['This is a picture of a painting']).to(device)
 
     cross_validation = KFold(n_splits=cv_splits, shuffle=True)
 
+    gen_losses = len(lambdas) * [0]
+    gen_accuracies = len(lambdas) * [0]
+
+    # k-fold cross-validation
     for train_index, test_index in tqdm.tqdm(cross_validation.split(X), desc='Folds', total=cv_splits):
         
+        # split data
         X_train, X_test = X[train_index], X[test_index]
         y_train, y_test = y[train_index], y[test_index]
 
-        
-        gen_losses = len(lambdas) * [0]
-        gen_accuracies = len(lambdas) * [0]
-
+        # train each model on data split
         for idx, _lambda in enumerate(tqdm.tqdm(lambdas, desc='Models', leave=False)):
             criterion = CustomCriterion(_lambda=_lambda, base_model=base_model)
             model = get_model()
             optimizer = Adam(model.parameters(), lr=lr)
 
+            # training
             loss, accuracy = train(
                 model=model,
                 X_train=X_train,
@@ -296,15 +322,22 @@ def main(
                 early_stopping=early_stopping
             )
 
-            gen_losses[idx] += loss * len(test_index) / len(train_index)
-            gen_accuracies[idx] += accuracy * len(test_index) / len(train_index)
+            # update generalization metrics
+            metric_weights = len(test_index) / len(train_index)
+            gen_losses[idx] += loss * metric_weights
+            gen_accuracies[idx] += accuracy * metric_weights
 
-
+    # print results
     best_lambda = lambdas[gen_accuracies.index(max(gen_accuracies))]
+    print(f'Best lambda: {best_lambda}')
+    print(tabulate(zip(lambdas, gen_losses, gen_accuracies), headers=['Lambda', 'Loss', 'Accuracy']))
+
+    # train the best model on the whole dataset
     model = get_model()
     optimizer = Adam(model.parameters(), lr=lr)
     criterion = CustomCriterion(_lambda=best_lambda, base_model=base_model)
 
+    # load test data, either from the test split or from training csv
     if test_csv_name is not None:
         dataset = EncodedDataset(csv_file=os.path.join(ann_folder, test_csv_name), root_dir=root_dir)
         dataloader = DataLoader(dataset)
@@ -314,8 +347,7 @@ def main(
     X_test = torch.concat([d[0] for d in test_data]).to(torch.float).to(device)
     y_test = torch.concat([d[1] for d in test_data]).to(torch.long).to(device)
 
-    print(f'Best lambda: {best_lambda}')
-
+    # train the best model
     train(
         model=model,
         X_train=X,
@@ -329,9 +361,11 @@ def main(
         early_stopping=early_stopping
     )
 
+    # evaluate the model
     test_loss, test_accuracy = eval(model=model, X=X_test, y=y_test, criterion=criterion)
     train_loss, train_accuracy = eval(model=model, X=X, y=y, criterion=criterion)
 
+    # save results
     msg = (f'Best lambda: {best_lambda}\n'
            f'Final test loss: {test_loss}\n'
            f'Final test accuracy: {test_accuracy}\n'
@@ -342,11 +376,11 @@ def main(
     with open(output_path_global.with_suffix('.txt'), 'w') as f:
         f.write(msg)
 
-    # set output path with _last suffix
     torch.save(model.state_dict(), output_path_global.with_stem(output_path_global.stem + '_last'))
 
 
 
 if __name__ == '__main__':
+    """Runs the main function with the tyro CLI. It works like argparse. Run with --help to see the options."""
     import tyro
     tyro.cli(main)
