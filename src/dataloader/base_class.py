@@ -1,6 +1,6 @@
 import os
 from os import PathLike
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Callable
 from abc import ABC, abstractmethod
 from enum import Enum
 from copy import deepcopy
@@ -84,6 +84,15 @@ class PaintingDataset(Dataset, ABC):
         assert all(label in self.index_to_label for label in labels), f"Invalid label in {labels=}"
         
         mask = self.annotations['label'].isin(labels)
+
+        this = deepcopy(self)
+        this.annotations = this.annotations[mask].reset_index(drop=True)
+        return this
+
+    def split_on_hash(self, splitter: Callable[[float], bool]) -> 'PaintingDataset':
+        """Give a function which takes a float in the [0,1] interval and returns wether ot not is should belong to the dataset"""
+        hashes = self.annotations['hash'].tolist()
+        mask = np.array([splitter(h) for h in hashes])
 
         this = deepcopy(self)
         this.annotations = this.annotations[mask].reset_index(drop=True)
