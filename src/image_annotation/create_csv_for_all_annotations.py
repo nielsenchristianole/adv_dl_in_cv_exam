@@ -9,8 +9,9 @@ from src.utils.config import Config
 from src.utils.misc import split_path, hash_image_name
 
 
-def main(exclude_search_strings: Optional[List[str]]=None) -> None:
-    exclude_search_strings = ['**/never/**'] if exclude_search_strings is None else exclude_search_strings
+def main(label_to_exclude_search_strings: Optional[dict[str, str]]=None) -> None:
+    label_to_exclude_search_strings = {'never': '**/never/**'} if label_to_exclude_search_strings is None else label_to_exclude_search_strings
+    assert 'default' not in label_to_exclude_search_strings, 'default is a reserved label name. Please choose another name.'
     columns = ['image', 'path', 'label', 'hash']
 
     cfg = Config('configs/config.yaml')
@@ -21,17 +22,26 @@ def main(exclude_search_strings: Optional[List[str]]=None) -> None:
     all_paths = set(glob('**/*.jpg', root_dir=root_dir, recursive=True))
     all_paths |= set(glob('**/*.png', root_dir=root_dir, recursive=True))
 
-    for pattern in exclude_search_strings:
-        all_paths -= set(glob(pattern, root_dir=root_dir, recursive=True))
+    label_to_image_set = dict()
+    for label, pattern in label_to_exclude_search_strings.items():
+        label_set = set(glob(pattern, root_dir=root_dir, recursive=True)) & all_paths
+        all_paths -= label_set
+        label_to_image_set[label] = label_set
+    label_to_image_set['default'] = all_paths
 
-    all_paths = list(all_paths)
-    image_ids = [split_path(p)[1] for p in all_paths]
-    labels = len(all_paths) * ['default']
-    hashes = [hash_image_name(image_id) for image_id in image_ids]
-    data = np.array((image_ids, all_paths, labels, hashes)).T
+    dfs = []
+    for label, image_set in label_to_image_set.items():
+        image_set = list(image_set)
+        image_ids = [split_path(p)[1] for p in image_set]
+        labels = len(image_set) * [label]
+        hashes = [hash_image_name(image_id) for image_id in image_ids]
+        data = np.array((image_ids, image_set, labels, hashes)).T
 
-    df = pd.DataFrame(data, columns=columns)
-    df.to_csv(os.path.join(out_path, 'all_wanted_images.csv'), index=False)
+        df = pd.DataFrame(data, columns=columns)
+        dfs.append(df)
+
+    all_df = pd.concat(dfs, ignore_index=True)
+    all_df.to_csv(os.path.join(out_path, 'all_wanted_images.csv'), index=False)
 
 
 if __name__ == '__main__':

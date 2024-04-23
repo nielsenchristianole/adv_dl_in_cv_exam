@@ -3,6 +3,7 @@ import requests
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional
+from typing import TypedDict
 
 import numpy as np
 from PIL import Image
@@ -27,6 +28,7 @@ class EmbType(Enum):
 class ClipHead(nn.Module, ABC):
     requires_emb_type = EmbType
     index_class: list[str]
+    _weights: torch.Tensor
 
     def __init__(self) -> None:
         super().__init__()
@@ -46,6 +48,8 @@ class LinearHead(ClipHead):
         super().__init__()
         emb_dim = load_config(config_path)['CLIP']['latent_dim']
         self.head = nn.Linear(emb_dim, len(classes))
+
+        # self._weights = self.head.weight
 
         self.requires_emb_type = ClipHead.requires_emb_type.CLASSIFICATION
 
@@ -71,8 +75,7 @@ class ZeroShotHead(ClipHead):
         proj_emb = clipmodel.text_projection(emb)
         proj_emb /= proj_emb.norm(p=2, dim=-1, keepdim=True)
 
-        self._weights = nn.Parameter(proj_emb)
-        self.temperature = nn.Parameter(clipmodel.logit_scale.exp())
+        self._weights = nn.Parameter(proj_emb * clipmodel.logit_scale.exp())
 
         self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
 
@@ -80,7 +83,7 @@ class ZeroShotHead(ClipHead):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x / x.norm(p=2, dim=-1, keepdim=True)
-        return F.linear(x, self._weights) * self.temperature
+        return F.linear(x, self._weights)
 
 
 class PCAReducedHead(ClipHead):
@@ -91,8 +94,10 @@ class PCAReducedHead(ClipHead):
         self.cfg = Config('configs/config.yaml')
 
         self._pca_emb_dim = pca_emb_dim
-        self.requires_emb_type = ClipHead.requires_emb_type.CLASSIFICATION
+        self.requires_emb_type = ClipHead.requires_emb_type.ZEROSHOT
         self.head = nn.Linear(self._pca_emb_dim or self.emb_dim, len(classes))
+
+        # self._weights = self.head.weight
 
         self.index_class = classes
     
@@ -139,6 +144,12 @@ class PCAReducedHead(ClipHead):
         return self.head(x)
         
 
+class ClipHeadTypes(Enum):
+    linear: LinearHead = LinearHead
+    zeroshot: ZeroShotHead = ZeroShotHead
+    pca: PCAReducedHead = PCAReducedHead
+
+
 class CLIPWithHead(nn.Module):
 
     def __init__(self, head: ClipHead, config_path: str = 'configs/CLIP_config.yaml') -> None:
@@ -152,7 +163,7 @@ class CLIPWithHead(nn.Module):
     def __base_initialization(self):
 
         clipmodel = CLIPModel.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
-        self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
+        self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'], do_rescale=False)
 
         self.vision_model = clipmodel.vision_model
         self.visual_projection = clipmodel.visual_projection
@@ -217,8 +228,8 @@ if __name__ == '__main__':
     img = CLIPWithHead.get_example_image()
     class_prompts = [f"An image of a {obj}" for obj in ['cat', 'dog', 'car']]
 
-    model = PCAReducedHead(class_prompts).fit_pca()
-    print(model(torch.randn(1, 768)))
+    model = PCAReducedHead(class_prompts).fit_pca(splits=['train'])
+    print(model(torch.randn(1, 512)))
 
     model = CLIPWithHead.with_classification_head(class_prompts)
     print('Classification emb shape', model.embed_image(img).shape)
