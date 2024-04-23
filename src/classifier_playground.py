@@ -23,41 +23,34 @@ dataset = AnnotatedImageDataset(
     device=device
 )
 
-dataloader = DataLoader(dataset, shuffle=False)
+dataloader = DataLoader(dataset, shuffle=True)
 
 img: torch.Tensor
 label: torch.Tensor
 img, label = next(iter(dataloader))
 
-import matplotlib.pyplot as plt
-plt.imshow(img[0].permute(1, 2, 0).detach().cpu())
-plt.show()
-
 head = LinearHead(dataset.index_to_label)
 head.load_state_dict(torch.load('models/head_best.pth', map_location=device))
 
 model = CLIPWithHead(head).to(device).eval()
-model_2 = CLIPWithHead(head, use_shit=True).to(device).eval()
 
-out_1 = model(img)
-out_2 = model_2(img)
 
-print(out_1)
-print(out_2)
+m = 10
+step_size = 0.1
+target = torch.tensor((5,), device=device)
 
-# print(torch.abs(out_1 - out_2).max())
-# print(torch.isclose(out_1, out_2).all())
 
-quit()
+delta = torch.zeros_like(img)
+for _ in range(m):
+    delta = delta.detach().clone().requires_grad_(True)
 
-x = torch.clone(img)
-x.requires_grad_(True)
+    x = img + delta
 
-out = model(x)
-loss = cross_entropy(out, label)
-loss.backward()
+    logits = model(x)
+    loss = cross_entropy(logits, target)
+    loss.backward()
+    print(loss.item())
 
-grad = x.grad
+    delta = delta - step_size * delta.grad
 
-print(grad)
 
