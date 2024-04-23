@@ -8,6 +8,9 @@ import pdb
 
 import src.models.diffusion_utils as utils
 import src.models.diffusion_sampling as sampling
+from src.models.CLIP import CLIPWithHead, LinearHead
+from src.utils.config import Config
+import os
 
 class ResidualBlock(nn.Module):
     def __init__(self, main, skip=None):
@@ -212,11 +215,22 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(path, map_location=device))
     model.eval()
 
+    linear_head_path = "./models/head_best.pth"
+    linear_head_state_dict = torch.load(linear_head_path)
+    num_classes = 27
+    linear_head_model = LinearHead(num_classes * ['This is a picture of a painting'])
+    linear_head_model.load_state_dict(linear_head_state_dict)
+
+    classifier = CLIPWithHead(linear_head_model).to(device)
+
     # create a dummy input
-    steps = 5000
+    steps = 1000
+    label = torch.tensor([0], device=device)
     x = torch.randn([1,3,256,256]).to(device)
     t = torch.linspace(1,0, steps + 1)[:-1].to(device)
-    x_denoised = sampling.sample(model, x, steps=t, eta=0, extra_args={})    
+    x_denoised = sampling.sample_guidance(model=model, x=x, label=label, classifier=classifier, steps=t, eta=0, extra_args={})    
+
+    # x_denoised = sampling.sample_guidance(model=model, x=x, classifier=classifier, steps=t, eta=0, extra_args={})    
 
     from torchvision.utils import save_image
     save_image(x_denoised, 'denoised_img.png')

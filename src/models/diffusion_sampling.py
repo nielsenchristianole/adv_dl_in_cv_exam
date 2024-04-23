@@ -4,6 +4,72 @@ import torch
 from tqdm.auto import trange
 
 import src.models.diffusion_utils as utils
+import pdb
+from torchvision.utils import save_image
+import torch.nn.functional as F
+
+
+@torch.no_grad()
+def sample_guidance(model, x, classifier, label, steps, eta, extra_args, classifier_guidance_scale=1.0, callback=None):
+    """Draws samples from a model given starting noise."""
+
+    ts = x.new_ones([x.shape[0]])
+
+    # Create the noise schedule
+    alphas, sigmas = utils.t_to_alpha_sigma(steps)
+
+    # The sampling loop
+    for i in trange(len(steps), disable=None):
+
+        # Get the model output (v, the predicted velocity)
+        with torch.cuda.amp.autocast():
+            v = model(x, ts * steps[i], **extra_args).float()
+
+        # Predict the noise and the denoised image
+        pred = x * alphas[i] - v * sigmas[i]
+        eps = x * sigmas[i] + v * alphas[i]
+
+        # if shape of x is not 224x224, resize it to 224x224
+        if pred.shape[-1] != 224:
+            pred_reshaped = torch.nn.functional.interpolate(pred, size=(224, 224), mode='bilinear', align_corners=False)
+
+        if i % 100 == 0 and i != 0:
+            save_image(pred, f"test/pred_test_{i}.png")
+
+        # Calculate the classifier output and the cross-entropy loss
+        with torch.cuda.amp.autocast():
+            pred_reshaped = (pred_reshaped - pred_reshaped.min()) / (pred_reshaped.max() - pred_reshaped.min())
+            logits = classifier(pred_reshaped)
+            pdb.set_trace()
+            loss = F.cross_entropy(logits, label)
+
+        # Compute gradients to guide the sampling
+        grads = torch.autograd.grad(loss, x)[0]
+        v = v - classifier_guidance_scale * grads
+
+        # Call the callback
+        if callback is not None:
+            callback({'x': x, 'i': i, 't': steps[i], 'v': v, 'pred': pred})
+
+        # If we are not on the last timestep, compute the noisy image for the
+        # next timestep.
+        if i < len(steps) - 1:
+            # If eta > 0, adjust the scaling factor for the predicted noise
+            # downward according to the amount of additional noise to add
+            ddim_sigma = eta * (sigmas[i + 1]**2 / sigmas[i]**2).sqrt() * \
+                (1 - alphas[i]**2 / alphas[i + 1]**2).sqrt()
+            adjusted_sigma = (sigmas[i + 1]**2 - ddim_sigma**2).sqrt()
+
+            # Recombine the predicted noise and predicted denoised image in the
+            # correct proportions for the next step
+            x = pred * alphas[i + 1] + eps * adjusted_sigma
+
+            # Add the correct amount of fresh noise
+            if eta:
+                x += torch.randn_like(x) * ddim_sigma
+
+    # If we are on the last timestep, output the denoised image
+    return pred
 
 
 # DDPM/DDIM sampling
