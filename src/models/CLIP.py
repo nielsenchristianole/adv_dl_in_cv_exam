@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from transformers import CLIPImageProcessor, CLIPModel, AutoTokenizer
+import torchvision
 
 from src.utils.misc import load_config
 from src.utils.config import Config
@@ -40,7 +41,6 @@ class ClipHead(nn.Module, ABC):
 
         Returns shape of (batch_dim, num_classes)
         """
-
 
 class LinearHead(ClipHead):
 
@@ -149,21 +149,49 @@ class ClipHeadTypes(Enum):
     zeroshot: ZeroShotHead = ZeroShotHead
     pca: PCAReducedHead = PCAReducedHead
 
+class CLIPProcessorWithGrads:
+    def __init__(self, CFG: dict) -> None:
+        self.CFG = CFG
+
+        self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'], do_rescale=False)
+        self.OPENAI_CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
+        self.OPENAI_CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
+        self.normalize = torchvision.transforms.Normalize(
+            self.OPENAI_CLIP_MEAN,
+            self.OPENAI_CLIP_STD)
+        self.resize = torchvision.transforms.Resize(224)
+        self.center_crop = torchvision.transforms.CenterCrop(224)
+
+    def preprocess_images(self, imgs):
+        imgs = self.center_crop(imgs)
+        imgs = self.resize(imgs)
+        imgs = self.center_crop(imgs)
+        imgs = self.normalize(imgs)
+        return imgs
+
+    def __call__(self, imgs: torch.tensor,  **kwargs):
+        processed_features = self.processor(**kwargs)
+        processed_features['pixel_values'] = self.preprocess_images(imgs)
+        processed_features = {key:value.to(imgs.device) for (key, value) in processed_features.items()}
+        return processed_features
 
 class CLIPWithHead(nn.Module):
 
-    def __init__(self, head: ClipHead, config_path: str = 'configs/CLIP_config.yaml') -> None:
+    def __init__(self, head: ClipHead, config_path: str = 'configs/CLIP_config.yaml', use_shit: bool = False) -> None:
         super().__init__()
         self.CFG = load_config(config_path)
-        self.__base_initialization()
+        self.__base_initialization(use_shit) # hardcoded to False because CLIPImageProcessor does not retain gradients
+
         if self.CFG['CLIP']['freeze']:
             self.freeze_base()
         self.head = head
         
-    def __base_initialization(self):
-
+    def __base_initialization(self, use_shit):
         clipmodel = CLIPModel.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
-        self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'], do_rescale=False)
+        if use_shit:
+            self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'], do_rescale=False)
+        else:
+            self.processor = CLIPProcessorWithGrads(self.CFG)
 
         self.vision_model = clipmodel.vision_model
         self.visual_projection = clipmodel.visual_projection
@@ -177,7 +205,7 @@ class CLIPWithHead(nn.Module):
             device = image.device
         else:
             device = torch.device('cpu')
-        return self.processor(images=image, return_tensors="pt", padding=True)['pixel_values'].to(device)
+        return self.processor(imgs=image, images=torch.rand((1, 3, 224, 224)), return_tensors="pt", padding=True)['pixel_values'].to(device)
 
     def embed_image(self, image: torch.Tensor, preprocess=True):
         """
