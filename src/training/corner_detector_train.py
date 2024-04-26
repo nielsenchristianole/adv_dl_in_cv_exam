@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from torchvision.models import resnet18, mobilenet_v3_small
+from torchvision.models import resnet18, mobilenet_v3_large
 
 import lightning as L
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -25,7 +25,7 @@ class CornerDetector(L.LightningModule):
         
         self.scale_to = scale_to
         
-        self.mobile_net = mobilenet_v3_small(pretrained=True)
+        self.mobile_net = mobilenet_v3_large(pretrained=True)
         last_channel = self.mobile_net.classifier[-1].in_features
         self.mobile_net.classifier[-1] = nn.Linear(last_channel, 8)
 

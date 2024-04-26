@@ -45,21 +45,41 @@ def show_predictions(batch, outputs, prefix : str, scale_to=256):
         
 
 # Load the pretrained model
-model = CornerDetector.load_from_checkpoint('model_checkpoints/0904-0850-s256-b32.ckpt')
+model = CornerDetector.load_from_checkpoint('model_checkpoints/finalasdjas-v1.ckpt')
 
 # Load the test dataset
-test_dataset = CornerDataset(scale_to=256, is_train=False)
+test_dataset = CornerDataset(scale_to=512, is_train=False)
 test_dataloader = DataLoader(test_dataset, batch_size=1)
 
 # Set the model to evaluation mode
 model.eval()
 
-# Iterate over the test dataset and make predictions
-for batch in test_dataloader:
-    inputs, targets = batch
+# # Iterate over the test dataset and make predictions
+# for batch in test_dataloader:
+#     inputs, targets = batch
+orig = cv2.imread('data/morten.png')
+orig = cv2.cvtColor(orig, cv2.COLOR_BGR2RGB)
+img : np.ndarray = cv2.resize(orig, (512, 512))
+img = img / 255
+img = (img - IMAGENET_MEAN) / IMAGENET_STD
+img = img.transpose(2, 0, 1)
 
-    # Forward pass
-    with torch.no_grad():
-        outputs = model(inputs)
-        
-    show_predictions(batch, outputs, "test")
+import matplotlib.pyplot as plt
+
+input = torch.tensor(img, dtype=torch.float32)[None,...]
+
+# Forward pass
+with torch.no_grad():
+    outputs = model(input)
+    
+# scale the bbox from 0-1 to orig.shape
+outputs = outputs[0].cpu().numpy()
+w, h = orig.shape[1], orig.shape[0]
+outputs = outputs * np.array([w, h, w, h, w, h, w, h])
+
+# plot the orignal image and the predicted bbox
+
+plt.imshow(orig)
+plt.plot([outputs[0], outputs[2], outputs[4], outputs[6], outputs[0]], [outputs[1], outputs[3], outputs[5], outputs[7], outputs[1]], 'o-')
+plt.show()
+    # show_predictions(batch, outputs, "test", scale_to=512)
