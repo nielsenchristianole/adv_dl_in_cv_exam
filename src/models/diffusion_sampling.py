@@ -9,8 +9,8 @@ from torchvision.utils import save_image
 import torch.nn.functional as F
 
 
-@torch.no_grad()
-def sample_guidance(model, x, classifier, label, steps, eta, extra_args, classifier_guidance_scale=1.0, callback=None):
+# @torch.no_grad()
+def sample_guidance(model, x, classifier, label, steps, eta, extra_args, classifier_guidance_scale=1e3, callback=None):
     """Draws samples from a model given starting noise."""
 
     ts = x.new_ones([x.shape[0]])
@@ -27,25 +27,33 @@ def sample_guidance(model, x, classifier, label, steps, eta, extra_args, classif
 
         # Predict the noise and the denoised image
         pred = x * alphas[i] - v * sigmas[i]
-        eps = x * sigmas[i] + v * alphas[i]
 
-        # if shape of x is not 224x224, resize it to 224x224
-        if pred.shape[-1] != 224:
-            pred_reshaped = torch.nn.functional.interpolate(pred, size=(224, 224), mode='bilinear', align_corners=False)
+        # # if shape of x is not 224x224, resize it to 224x224
+        # if pred.shape[-1] != 224:
+        #     pred_reshaped = torch.nn.functional.interpolate(pred, size=(224, 224), mode='bilinear', align_corners=False)
 
         if i % 100 == 0 and i != 0:
             save_image(pred, f"test/pred_test_{i}.png")
 
         # Calculate the classifier output and the cross-entropy loss
         with torch.cuda.amp.autocast():
-            pred_reshaped = (pred_reshaped - pred_reshaped.min()) / (pred_reshaped.max() - pred_reshaped.min())
-            logits = classifier(pred_reshaped)
-            pdb.set_trace()
+            # pred_reshaped = (pred_reshaped - pred_reshaped.min()) / (pred_reshaped.max() - pred_reshaped.min())
+            logits = classifier(pred)
             loss = F.cross_entropy(logits, label)
+            loss = loss * classifier_guidance_scale
 
         # Compute gradients to guide the sampling
         grads = torch.autograd.grad(loss, x)[0]
-        v = v - classifier_guidance_scale * grads
+
+        # if i % 100 == 0 and i!=0:
+        #     pdb.set_trace()
+        if steps[i] < 1:
+            v = v.detach() - grads
+        else:
+            v = v.detach()
+
+        pred = x * alphas[i] - v * sigmas[i]
+        eps = x * sigmas[i] + v * alphas[i]
 
         # Call the callback
         if callback is not None:
