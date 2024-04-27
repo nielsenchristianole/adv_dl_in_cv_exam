@@ -226,10 +226,12 @@ if __name__ == "__main__":
 
     num_samples = 5
     steps = 100
-    target_label = 26
     eta=1
+    target_label = 26
+
     forward_guidance_scale=100
     num_backward_steps=0
+    backward_step_size=1e-1
     backward_guidance_scale=1e-1
 
     # create a dummy input
@@ -247,6 +249,7 @@ if __name__ == "__main__":
         num_backward_steps=num_backward_steps,
         backward_guidance_scale=backward_guidance_scale,
         forward_guidance_scale=forward_guidance_scale,
+        backward_step_size=backward_step_size
     )
 
     out = classifier(sample)

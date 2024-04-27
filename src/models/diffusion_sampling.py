@@ -158,6 +158,7 @@ def cond_sample(
     classifier: torch.nn.Module,
     label: torch.Tensor,
     num_backward_steps: int=10,
+    backward_step_size: float=1e-1,
     backward_guidance_scale: float=1e-1,
     forward_guidance_scale: float=1e-1,
     verbose: bool=True
@@ -210,7 +211,7 @@ def cond_sample(
                     loss = torch.nn.functional.cross_entropy(logits, label)
                     loss.backward()
 
-                    delta = delta - backward_guidance_scale * delta.grad
+                    delta = delta - backward_step_size * delta.grad
 
                 v = (v - delta * torch.sqrt(alphas[i] / (1 - alphas[i])))
 
