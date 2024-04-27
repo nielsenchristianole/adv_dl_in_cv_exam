@@ -1,5 +1,6 @@
 import os
 from os import PathLike
+from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np
@@ -10,7 +11,6 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from src.utils.config import Config
-from src.utils.misc import image_path_to_encoding_path
 from src.dataloader.base_class import PaintingDataset
 
 
@@ -21,7 +21,7 @@ def load_whole_dataset(
     cfg = Config('configs/config.yaml')
 
     csv = os.path.join(cfg.get('data', 'annotations_path'), csv_name or 'all_wanted_images.csv')
-    dataset = EncodedDataset(csv, cfg.get('data', 'raw_path')).get_dataset_subset(splits)
+    dataset = EncodedDataset(csv, cfg.get('data', 'raw_path')).get_dataset_split_subset(splits)
     dataloader = DataLoader(dataset, batch_size=128, shuffle=False)
     encodings = list()
     labels = list()
@@ -44,7 +44,7 @@ class EncodedDataset(PaintingDataset):
 
     def get_x(self, index: int) -> torch.Tensor:
         _, relative_path, _, _ = self.annotations.iloc[index]
-        relative_path = image_path_to_encoding_path(relative_path)
+        relative_path = Path(relative_path).with_suffix('.npy')
         path = os.path.join(self.root_dir, relative_path)
         encoding = np.load(path)
         encoding = torch.from_numpy(encoding).to(self.device)
@@ -52,22 +52,15 @@ class EncodedDataset(PaintingDataset):
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Load and display images from a CSV file.")
-    parser.add_argument('--file', type=str, help="The name of the CSV file without extension.")
-    args = parser.parse_args()
 
     cfg = Config('configs/config.yaml')
-    data_folder = cfg.get('data', 'raw_path')
+    data_folder = cfg.get('data', 'encoded_path')
     ann_folder = cfg.get('data', 'annotations_path')
 
-    csv_name = args.file
-    if csv_name is None:
-        csv_name, _ = os.path.splitext(os.listdir(ann_folder)[0])
-    csv_path = os.path.join(ann_folder, f"{csv_name}.csv")
+    csv_path = os.path.join(ann_folder, 'calle2.csv')
 
     dataset = EncodedDataset(csv_file=csv_path, root_dir=data_folder)
-    partial_dataset = dataset.get_dataset_subset('train')
+    partial_dataset = dataset.get_dataset_split_subset('train')
     dataloader = DataLoader(dataset, batch_size=9, shuffle=True)
 
     images, labels = next(iter(dataloader))

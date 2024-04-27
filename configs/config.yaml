@@ -2,6 +2,10 @@ data:
   raw_path: data/raw/imgs
   annotations_path: data/annotations
   elo_annotations_path: data/elo_annotations
+  cropped_path: data/cropped
+  encoded_path: data/encoded
+  wikiart_path: data/wikiart
+  wikiart_encoded_path: data/wikiart_encodings
   data_split:
     train: 0.7
     val: 0.1
