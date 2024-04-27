@@ -5,6 +5,7 @@ import math
 import torch
 from torch import nn
 import pdb
+import numpy as np
 
 import src.models.diffusion_utils as utils
 import src.models.diffusion_sampling as sampling
@@ -208,7 +209,7 @@ class WikiArt256Model(nn.Module):
 if __name__ == "__main__":
     # load model file and run inference
 
-    device = "cuda"
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     path = 'models/wikiart_256.pth'
     model = WikiArt256Model().to(device)
@@ -223,21 +224,41 @@ if __name__ == "__main__":
 
     classifier = CLIPWithHead(linear_head_model).to(device)
 
-    # create a dummy input
+    num_samples = 5
     steps = 100
-    label = torch.tensor([26], device=device)
-    x = torch.randn([1,3,256,256], requires_grad=True).to(device)
-    t = torch.linspace(1,0, steps + 1)[:-1].to(device)
-    x_denoised = sampling.sample_guidance(model=model, x=x, label=label, classifier=classifier, classifier_guidance_scale=500, steps=t, eta=0, extra_args={})    
+    target_label = 26
+    eta=1
+    forward_guidance_scale=1
+    num_backward_steps=0
+    backward_guidance_scale=1e-1
 
-    # x_denoised = sampling.sample_guidance(model=model, x=x, classifier=classifier, steps=t, eta=0, extra_args={})    
-
-
-    logits = classifier(x_denoised)
-    print("Class pred: ", torch.argmax(logits))
+    # create a dummy input
+    x = torch.randn([num_samples, 3, 256, 256], requires_grad=True).to(device)
+    t = torch.linspace(1, 0, steps + 1)[:-1].to(device)
     
-    from torchvision.utils import save_image
-    import uuid
-    uid = str(uuid.uuid4())
-    save_image(x_denoised, f'denoised_img_class{int(label.item())}_{uid}.png')
-    
+    label = torch.tensor(num_samples*(target_label,), device=device)
+    sample = sampling.cond_sample(
+        model=model,
+        x=x,
+        steps=t,
+        eta=eta,
+        classifier=classifier,
+        label=label,
+        num_backward_steps=num_backward_steps,
+        backward_guidance_scale=backward_guidance_scale,
+        forward_guidance_scale=forward_guidance_scale,
+    )
+
+    out = classifier(sample)
+    loss = torch.nn.functional.cross_entropy(out, label)
+    probs = torch.nn.functional.softmax(out, dim=1)
+    print(f"Loss: {loss.item()}")
+    print(f"Predicted class: {probs.argmax(dim=1)}")
+    print(f"Target class probability: {probs[:, target_label]}")
+    print(f"Predicted probability: {probs.max(dim=1).values}")
+    print(np.array2string(probs.detach().cpu().numpy(), precision=3))
+
+    sampling.plot_tensor(sample)
+    import matplotlib.pyplot as plt
+    plt.gca()
+    plt.savefig("sample.png")

@@ -9,6 +9,27 @@ from torchvision.utils import save_image
 import torch.nn.functional as F
 
 
+def plot_tensor(x):
+    import matplotlib.pyplot as plt
+    if x.ndim == 3:
+        fig, ax = plt.subplots(1, 1)
+        axs = [ax]
+        x = x.unsqueeze(0)
+    if x.ndim == 4:
+        num_imgs = x.shape[0]
+        import math
+        num_rows = math.ceil(math.sqrt(num_imgs))
+        fig, axs = plt.subplots(num_rows, num_rows)
+        axs = axs.flatten()
+    for ax, img in zip(axs, x):
+        img -= img.min()
+        img /= img.max()
+        ax.imshow(img.detach().cpu().numpy().transpose(1, 2, 0))
+        ax.axis('off')
+    fig.tight_layout()
+    plt.show()
+
+
 # @torch.no_grad()
 def sample_guidance(model, x, classifier, label, steps, eta, extra_args, classifier_guidance_scale=1e3, callback=None):
     """Draws samples from a model given starting noise."""
@@ -126,7 +147,21 @@ def sample(model, x, steps, eta, extra_args, callback=None):
 
 
 @torch.no_grad()
-def cond_sample(model, x, steps, eta, extra_args, cond_fn, callback=None):
+def cond_sample(
+    *,
+    model: torch.nn.Module,
+    x: torch.Tensor,
+    steps: torch.Tensor,
+    eta: float,
+    extra_args: dict=dict(),
+    classifier: torch.nn.Module,
+    label: torch.Tensor,
+    num_backward_steps: int=10,
+    backward_guidance_scale: float=1e-1,
+    forward_guidance_scale: float=1e-1,
+    verbose: bool=True
+) -> torch.Tensor:
+    
     """Draws guided samples from a model given starting noise."""
     ts = x.new_ones([x.shape[0]])
 
@@ -134,7 +169,12 @@ def cond_sample(model, x, steps, eta, extra_args, cond_fn, callback=None):
     alphas, sigmas = utils.t_to_alpha_sigma(steps)
 
     # The sampling loop
-    for i in trange(len(steps), disable=None):
+    for i in trange(len(steps), disable=not verbose):
+
+        # check for nans
+        if torch.isnan(x).any():
+            print(i)
+            raise ValueError("x contains NaNs")
 
         # Get the model output
         with torch.enable_grad():
@@ -144,15 +184,34 @@ def cond_sample(model, x, steps, eta, extra_args, cond_fn, callback=None):
 
             pred = x * alphas[i] - v * sigmas[i]
 
-            # Call the callback
-            if callback is not None:
-                callback({'x': x, 'i': i, 't': steps[i], 'v': v.detach(), 'pred': pred.detach()})
-
             if steps[i] < 1:
-                cond_grad = cond_fn(x, ts * steps[i], pred, **extra_args).detach()
-                v = v.detach() - cond_grad * (sigmas[i] / alphas[i])
+                _pred = pred.clone().detach().requires_grad_(True)
+                logits = classifier(_pred)
+                loss = torch.nn.functional.cross_entropy(logits, label)
+                loss.backward()
+                cond_grad = forward_guidance_scale * _pred.grad
+                v = (v - cond_grad * (sigmas[i] / alphas[i])).detach()
             else:
                 v = v.detach()
+
+        if num_backward_steps > 0:        
+            pred = x * alphas[i] - v * sigmas[i]
+
+            with torch.enable_grad():
+                _pred = pred.clone().detach().requires_grad_(True)
+
+                # backward universal guidance
+                delta = torch.zeros_like(_pred)
+                for _ in range(num_backward_steps):
+                    delta = delta.detach().clone().requires_grad_(True)
+
+                    logits = classifier(_pred + delta)
+                    loss = torch.nn.functional.cross_entropy(logits, label)
+                    loss.backward()
+
+                    delta = delta - backward_guidance_scale * delta.grad
+
+                v = (v - delta * torch.sqrt(alphas[i] / (1 - alphas[i])))
 
         # Predict the noise and the denoised image
         pred = x * alphas[i] - v * sigmas[i]
