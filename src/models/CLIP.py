@@ -150,7 +150,7 @@ class ClipHeadTypes(Enum):
     pca: PCAReducedHead = PCAReducedHead
 
 class CLIPProcessorWithGrads:
-    def __init__(self, CFG: dict) -> None:
+    def __init__(self, CFG: dict, *, crop_and_norm: bool=True) -> None:
         self.CFG = CFG
 
         self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'], do_rescale=False)
@@ -161,12 +161,13 @@ class CLIPProcessorWithGrads:
             self.OPENAI_CLIP_STD)
         self.resize = torchvision.transforms.Resize(224)
         self.center_crop = torchvision.transforms.CenterCrop(224)
+        self.crop_and_norm = crop_and_norm
 
     def preprocess_images(self, imgs):
-        imgs = self.center_crop(imgs)
         imgs = self.resize(imgs)
-        imgs = self.center_crop(imgs)
-        imgs = self.normalize(imgs)
+        if self.crop_and_norm:
+            imgs = self.center_crop(imgs)
+            imgs = self.normalize(imgs)
         return imgs
 
     def __call__(self, imgs: torch.tensor,  **kwargs):
@@ -177,7 +178,7 @@ class CLIPProcessorWithGrads:
 
 class CLIPWithHead(nn.Module):
 
-    def __init__(self, head: ClipHead, config_path: str = 'configs/CLIP_config.yaml', use_shit: bool = False) -> None:
+    def __init__(self, head: ClipHead, config_path: str = 'configs/CLIP_config.yaml', use_shit: bool = False, *, crop_and_norm: bool=True) -> None:
         super().__init__()
         self.CFG = load_config(config_path)
         self.__base_initialization(use_shit) # hardcoded to False because CLIPImageProcessor does not retain gradients
@@ -185,13 +186,14 @@ class CLIPWithHead(nn.Module):
         if self.CFG['CLIP']['freeze']:
             self.freeze_base()
         self.head = head
+        self.crop_and_norm = crop_and_norm
         
     def __base_initialization(self, use_shit):
         clipmodel = CLIPModel.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'])
         if use_shit:
             self.processor = CLIPImageProcessor.from_pretrained(self.CFG['CLIP']['pretrained_ckpt'], do_rescale=False)
         else:
-            self.processor = CLIPProcessorWithGrads(self.CFG)
+            self.processor = CLIPProcessorWithGrads(self.CFG, crop_and_norm=self.crop_and_norm)
 
         self.vision_model = clipmodel.vision_model
         self.visual_projection = clipmodel.visual_projection

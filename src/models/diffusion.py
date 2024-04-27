@@ -222,7 +222,7 @@ if __name__ == "__main__":
     linear_head_model = LinearHead(num_classes * ['This is a picture of a painting'])
     linear_head_model.load_state_dict(linear_head_state_dict)
 
-    classifier = CLIPWithHead(linear_head_model).to(device)
+    classifier = CLIPWithHead(linear_head_model, crop_and_norm=False).to(device)
 
     num_samples = 5
     steps = 100
