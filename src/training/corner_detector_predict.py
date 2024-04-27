@@ -45,7 +45,7 @@ def show_predictions(batch, outputs, prefix : str, scale_to=256):
         
 
 # Load the pretrained model
-model = CornerDetector.load_from_checkpoint('model_checkpoints/finalasdjas-v1.ckpt')
+model = CornerDetector.load_from_checkpoint('model_checkpoints/inception.ckpt', map_location='cpu')
 
 # Load the test dataset
 test_dataset = CornerDataset(scale_to=512, is_train=False)
