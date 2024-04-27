@@ -42,3 +42,6 @@ annotate-corners:
 
 annotate-elo:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/image_annotation/elo_annotate.py
+
+plot-wikiart-data:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/plots/wikiart_plots.py
