@@ -27,6 +27,7 @@ def plot_tensor(x):
         ax.imshow(img.detach().cpu().numpy().transpose(1, 2, 0))
         ax.axis('off')
     fig.tight_layout()
+    fig.savefig("sample.png")
     plt.show()
 
 

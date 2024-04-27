@@ -228,7 +228,7 @@ if __name__ == "__main__":
     steps = 100
     target_label = 26
     eta=1
-    forward_guidance_scale=10
+    forward_guidance_scale=100
     num_backward_steps=0
     backward_guidance_scale=1e-1
 
@@ -253,12 +253,9 @@ if __name__ == "__main__":
     loss = torch.nn.functional.cross_entropy(out, label)
     probs = torch.nn.functional.softmax(out, dim=1)
     print(f"Loss: {loss.item()}")
-    print(f"Predicted class: {probs.argmax(dim=1)}")
-    print(f"Target class probability: {probs[:, target_label]}")
-    print(f"Predicted probability: {probs.max(dim=1).values}")
+    print(f"Predicted class: {probs.argmax(dim=1).detach().cpu().numpy()}")
+    print(f"Target class probability: {probs[:, target_label].detach().cpu().numpy()}")
+    print(f"Predicted probability: {probs.max(dim=1).values.detach().cpu().numpy()}")
     # print(np.array2string(probs.detach().cpu().numpy(), precision=3))
 
     sampling.plot_tensor(sample)
-    import matplotlib.pyplot as plt
-    plt.gca()
-    plt.savefig("sample.png")
