@@ -219,17 +219,19 @@ if __name__ == "__main__":
     linear_head_path = "./models/head_best.pth"
     linear_head_state_dict = torch.load(linear_head_path)
     num_classes = 27
-    linear_head_model = LinearHead(num_classes * ['This is a picture of a painting'])
+    linear_head_model = LinearHead(num_classes * [None])
     linear_head_model.load_state_dict(linear_head_state_dict)
 
     classifier = CLIPWithHead(linear_head_model, crop_and_norm=False).to(device)
 
     num_samples = 5
     steps = 100
-    target_label = 26
     eta=1
-    forward_guidance_scale=1
+    target_label = 26
+
+    forward_guidance_scale=100
     num_backward_steps=0
+    backward_step_size=1e-1
     backward_guidance_scale=1e-1
 
     # create a dummy input
@@ -247,18 +249,16 @@ if __name__ == "__main__":
         num_backward_steps=num_backward_steps,
         backward_guidance_scale=backward_guidance_scale,
         forward_guidance_scale=forward_guidance_scale,
+        backward_step_size=backward_step_size
     )
 
     out = classifier(sample)
     loss = torch.nn.functional.cross_entropy(out, label)
     probs = torch.nn.functional.softmax(out, dim=1)
     print(f"Loss: {loss.item()}")
-    print(f"Predicted class: {probs.argmax(dim=1)}")
-    print(f"Target class probability: {probs[:, target_label]}")
-    print(f"Predicted probability: {probs.max(dim=1).values}")
-    print(np.array2string(probs.detach().cpu().numpy(), precision=3))
+    print(f"Predicted class: {probs.argmax(dim=1).detach().cpu().numpy()}")
+    print(f"Target class probability: {probs[:, target_label].detach().cpu().numpy()}")
+    print(f"Predicted probability: {probs.max(dim=1).values.detach().cpu().numpy()}")
+    # print(np.array2string(probs.detach().cpu().numpy(), precision=3))
 
     sampling.plot_tensor(sample)
-    import matplotlib.pyplot as plt
-    plt.gca()
-    plt.savefig("sample.png")
