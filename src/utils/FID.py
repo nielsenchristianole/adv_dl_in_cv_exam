@@ -6,10 +6,18 @@ from tqdm import tqdm
 # torch
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.utils.data import DataLoader
 import torchvision
 
 import numpy as np
+from src.models.diffusion import WikiArt256Model
+from src.models.CLIP import CLIPWithHead, LinearHead
+import src.models.diffusion_sampling as sampling
+from src.dataloader.annotated_image import AnnotatedImageDataset
+
+# import the partials package
+from functools import partial
+from pathlib import Path
 
 class VGG(nn.Module):
     def __init__(self):
@@ -25,25 +33,32 @@ class VGG(nn.Module):
         
 class FID:
     
-    def __init__(self, feature_extractor, device):
+    def __init__(self, feature_extractor, device, samples_per_fid = 1000):
         self.device = device
         
         self.feature_extractor = feature_extractor
+        self.samples_per_fid = samples_per_fid
         
-    def calculate_fid(self, dataloader, diffusion_model, class_name):
+    def calculate_fid(self, *, dataloader, sample_method, class_idx, class_name):
+        # TODO: Add method description
 
         os.makedirs('out/FID_data', exist_ok=True)
         
+        # TODO: Adjust the number of samples by samples_per_fid
         features_real = np.empty((len(dataloader.dataset), 256))
         features_gen = np.empty((len(dataloader.dataset), 256))
         
         start_idx = 0
         for i, (images, _) in tqdm(enumerate(dataloader), leave=False):
-            images = images.to(self.device)
-            features_real[start_idx:start_idx + images.shape[0]] = self._get_features(images)
+            n_samples = images.shape[0]
             
-            # TODO: Sample from the diffusion model. Sample images.shape[0] images for the specified class
-            gen_images : torch.Tensor = None
+            images = images.to(self.device)
+            features_real[start_idx:start_idx + n_samples] = self._get_features(images)
+            
+            x = torch.randn([n_samples, 3, 256, 256], requires_grad=True).to(device)
+            label = torch.tensor(n_samples*(class_idx,), device=device)
+            
+            gen_images : torch.Tensor = sample_method(x = x, label = label)
             
             features = self._get_features(gen_images)
             features_gen[start_idx:start_idx + gen_images.shape[0]] = features
@@ -65,6 +80,7 @@ class FID:
         return fid
         
     def _get_features(self, images):
+        # TODO: Add method description
         self.feature_extractor.eval()
         self.feature_extractor.to(self.device)
         with torch.no_grad():
@@ -74,6 +90,7 @@ class FID:
         return features
 
     def _feature_statistics(self, features):
+        # TODO: Add method description
         mu = np.mean(features, axis=0)
         sigma = np.cov(features, rowvar=False)
         return mu, sigma
@@ -84,25 +101,75 @@ class FID:
 
         return fid
 
+
+def setup_diffusion_model(*, device,
+                          wiki_path = 'models/wikiart_256.pth',
+                          head_path = 'models/head_best.pth',
+                          num_classes = 27,
+                          steps = 100,
+                          eta = 1,
+                          forward_guidance_scale = 1,
+                          num_backward_steps = 0,
+                          backward_guidance_scale = 1e-1):
+    # TODO: Add method description
+
+    model = WikiArt256Model().to(device)
+    model.load_state_dict(torch.load(wiki_path, map_location=device))
+    model.eval()
+
+    linear_head_state_dict = torch.load(head_path)
+    linear_head_model = LinearHead(num_classes * ['This is a picture of a painting'])
+    linear_head_model.load_state_dict(linear_head_state_dict)
+
+    classifier = CLIPWithHead(linear_head_model, crop_and_norm=False).to(device)
+
+    t = torch.linspace(1, 0, steps + 1)[:-1].to(device)
+    
+    partial_cond_sample = partial(
+        sampling.cond_sample,
+        model=model,
+        steps=t,
+        eta=eta,
+        classifier=classifier,
+        num_backward_steps=num_backward_steps,
+        backward_guidance_scale=backward_guidance_scale,
+        forward_guidance_scale=forward_guidance_scale,
+    )
+    
+    return partial_cond_sample
+
+
 if __name__ == '__main__':
     np.random.seed(0)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    classes = ["Abstract_Expressionism","Minimalism","Action_painting","Naive_Art Primitivism",
-               "Analytical_cubism","New_Realism","Art_Nouveau_Modern","Northern_Renaissance",
-               "Baroque","Pointillism","Color_Field_Painting","Pop_Art","Contemporary_Realism",
-               "Post_Impressionism","Cubism","Realism","Early_Renaissance","Rococo",
-               "Expressionism","Romanticism","Fauvism","Symbolism","High_Renaissance","Synthetic_Cubism",
-               "Impressionism","Ukiyo-e","Mannerism_Late_Renaissance"]
+    classes = ["Abstract_Expressionism","Action_painting","Analytical_cubism",
+               "Art_Nouveau_Modern","Baroque","Color_Field_Painting",
+               "Contemporary_Realism","Cubism","Early_Renaissance",
+               "Expressionism","Fauvism","High_Renaissance","Impressionism",
+               "Mannerism_Late_Renaissance","Minimalism",
+               "Naive_Art Primitivism","New_Realism","Northern_Renaissance",
+               "Pointillism","Pop_Art","Post_Impressionism","Realism","Rococo",
+               "Romanticism","Symbolism","Synthetic_Cubism","Ukiyo-e"]
+    classes = {i: cls for i, cls in enumerate(classes)}
     
     feature_extractor = VGG()
     fid_calculator = FID(feature_extractor, device)
     
-    diffusion_model = None # TODO: Define the diffusion model
+    batch_size = 64
     
-    for cls in tqdm(classes):
+    for idx, name in classes.items():
     
-        dataloader = None # TODO: define dataloader that takes in cls
+        dataset = AnnotatedImageDataset.all_image_dataset(
+            csv_file = 'all_wanted_images.csv',
+            splits = [name]
+        )
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        partial_cond_sample = setup_diffusion_model(device = device)
     
-        fid_calculator.calculate_fid(dataloader, diffusion_model, cls)
+        fid_calculator.calculate_fid(dataloader = dataloader,
+                                     sample_method = partial_cond_sample,
+                                     class_idx = idx,
+                                     class_name = name)
+        
