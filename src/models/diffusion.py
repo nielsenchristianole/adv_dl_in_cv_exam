@@ -219,7 +219,7 @@ if __name__ == "__main__":
     linear_head_path = "./models/head_best.pth"
     linear_head_state_dict = torch.load(linear_head_path)
     num_classes = 27
-    linear_head_model = LinearHead(num_classes * ['This is a picture of a painting'])
+    linear_head_model = LinearHead(num_classes * [None])
     linear_head_model.load_state_dict(linear_head_state_dict)
 
     classifier = CLIPWithHead(linear_head_model, crop_and_norm=False).to(device)
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     steps = 100
     target_label = 26
     eta=1
-    forward_guidance_scale=1
+    forward_guidance_scale=10
     num_backward_steps=0
     backward_guidance_scale=1e-1
 
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     print(f"Predicted class: {probs.argmax(dim=1)}")
     print(f"Target class probability: {probs[:, target_label]}")
     print(f"Predicted probability: {probs.max(dim=1).values}")
-    print(np.array2string(probs.detach().cpu().numpy(), precision=3))
+    # print(np.array2string(probs.detach().cpu().numpy(), precision=3))
 
     sampling.plot_tensor(sample)
     import matplotlib.pyplot as plt
