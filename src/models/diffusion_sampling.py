@@ -122,6 +122,9 @@ def sample(model, x, steps, eta, extra_args, callback=None, plot_preds = False, 
     # The sampling loop
     for i in trange(len(steps), disable=None):
 
+        if torch.isnan(x).any():
+            return None
+
         # Get the model output (v, the predicted velocity)
         with torch.cuda.amp.autocast():
             v = model(x, ts * steps[i], **extra_args).float()

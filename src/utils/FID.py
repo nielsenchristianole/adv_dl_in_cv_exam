@@ -144,28 +144,21 @@ if __name__ == '__main__':
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    classes = ["Abstract_Expressionism","Action_painting","Analytical_cubism",
-               "Art_Nouveau_Modern","Baroque","Color_Field_Painting",
-               "Contemporary_Realism","Cubism","Early_Renaissance",
-               "Expressionism","Fauvism","High_Renaissance","Impressionism",
-               "Mannerism_Late_Renaissance","Minimalism",
-               "Naive_Art Primitivism","New_Realism","Northern_Renaissance",
-               "Pointillism","Pop_Art","Post_Impressionism","Realism","Rococo",
-               "Romanticism","Symbolism","Synthetic_Cubism","Ukiyo-e"]
-    classes = {i: cls for i, cls in enumerate(classes)}
+    dataset = AnnotatedImageDataset(
+        csv_file = 'data/annotations/wikiart_test.csv',
+        root_dir = 'data/wikiart',
+        device=device
+    )
+    classes = dataset.index_to_label
     
     feature_extractor = VGG()
     fid_calculator = FID(feature_extractor, device)
     
     batch_size = 64
     
-    for idx, name in classes.items():
-    
-        dataset = AnnotatedImageDataset.all_image_dataset(
-            csv_file = 'all_wanted_images.csv',
-            splits = [name]
-        )
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    for idx, name in enumerate(classes):
+
+        dataloader = DataLoader(dataset.get_dataset_label_subset(name), batch_size=batch_size, shuffle=True)
         partial_cond_sample = setup_diffusion_model(device = device)
     
         fid_calculator.calculate_fid(dataloader = dataloader,

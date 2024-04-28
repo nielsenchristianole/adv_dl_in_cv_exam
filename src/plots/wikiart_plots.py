@@ -9,7 +9,7 @@ from functools import cached_property
 from src.utils.config import Config
 from src.plots.dtu_colors import DTUColors
 
-cfg = Config("/Users/alf/Repos/adv_dl_in_cv_exam/configs/config.yaml")
+cfg = Config("configs/config.yaml")
 
 
 class WikiArtDatasetPlotter():
@@ -28,18 +28,30 @@ class WikiArtDatasetPlotter():
         wikiart_path = self.wikiart_path
         print("wikiart_path: ", wikiart_path)
 
-        counts = self.class_counts
+        ckeys = sorted(list(self.class_counts.keys()))
+
+        counts = np.array(list(self.class_counts[c] for c in ckeys), dtype=float)
+        sample_counts = np.array(list(self.samples_class_counts[c] for c in ckeys), dtype=float)
+
+        print("Total ddpm samples", sample_counts.sum())
 
         # Make histogram of image counts
-        fig = plt.figure(figsize=(8, 5))
-        ckeys = list(counts.keys())
+        fig, ax1 = plt.subplots(figsize=(8, 5))
+        pos = np.arange(len(counts))
         # replace _ with space for better readability
         ckeys = [c.replace("_", " ") for c in ckeys]
-        plt.bar(ckeys, counts.values(), color=self.colors.get_secondary_color("dtulightgreen"))
-        plt.xticks(rotation=45, ha='right', fontsize=8)
-        plt.xlabel("Genre")
-        plt.ylabel("Number of Images")
-        plt.title("Number of Images per Genre (WikiArt Dataset)")
+        c1 = self.colors.get_secondary_color("dtudarkgreen")
+        ax1.bar(pos-0.2, counts, width=0.4, color=c1, label='WikiArt')
+        plt.xticks(range(len(ckeys)), ckeys, rotation=45, ha='right', fontsize=8)
+        ax1.set_xlabel("Genre")
+        ax1.set_ylabel("Count WikiArt", color=c1)
+        plt.title("Genre distribution")
+        ax2 = ax1.twinx()
+        c2 = self.colors.get_secondary_color("dtudarkblue")
+        ax2.bar(pos+0.2, sample_counts, width=0.4, color=c2, label='Uncond samples')
+        ax2.set_ylabel('Count samples', color=c2)
+        ax1.legend(loc=2)
+        ax2.legend(loc=1)
         plt.tight_layout()
         fig = self.make_background_transparent(fig)
 
@@ -79,6 +91,18 @@ class WikiArtDatasetPlotter():
         self.save_plot(save_path)
 
         # plot
+
+    @cached_property
+    def samples_class_counts(self):
+        counts = {}
+        for folder in self.classes:
+            if os.path.isdir(os.path.join('data/sampled_images', folder)):
+                files = os.listdir(os.path.join('data/sampled_images', folder))
+                counts[folder] = len(files)
+            else:
+                print(f"Folder {folder} not found in samples folder.")
+                counts[folder] = 0
+        return counts
 
     @cached_property
     def class_counts(self):
