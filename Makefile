@@ -45,3 +45,7 @@ annotate-elo:
 
 plot-wikiart-data:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/plots/wikiart_plots.py
+
+
+plot-elo-scores:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/plots/elo_score_plots.py

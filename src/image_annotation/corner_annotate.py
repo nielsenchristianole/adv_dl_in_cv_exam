@@ -15,9 +15,9 @@ from pathlib import Path
 import cv2
 
 class CornerAnnotation:
-    def __init__(self, data_folder: PathLike, output_csv: PathLike, *, ignore_patters: list[str] | None=None):
+    def __init__(self, data_folder: Path, output_csv: PathLike, *, ignore_patters: list[str] | None=None):
         
-        self.data_folder = data_folder
+        self.data_folder : Path = data_folder
         self.output_csv = output_csv
         self.columns = ['image', 'path', 'corners', 'discard', 'hash']
         self.ignore_patters = ignore_patters or ['**/never/**']
@@ -35,13 +35,12 @@ class CornerAnnotation:
         self.annotated_set = set(df['path'])
         
         self.tmp_corners = []
-        
 
     def append_annotation_to_csv(self, path: PathLike, corners: list, discard : bool):
         """Append the annotation to the CSV file."""
         # Append the annotation to the CSV file'
         _, image_id, _ = split_path(path)
-        row = [image_id, path, corners, discard, hash_image_name(image_id)]
+        row = [image_id, (self.data_folder / path).relative_to('data'), corners, discard, hash_image_name(image_id)]
         df = pd.DataFrame([row], columns=self.columns)
         df.to_csv(self.output_csv, mode='a', index=False, header=not os.path.exists(self.output_csv))
         self.annotated_set.add(path)
