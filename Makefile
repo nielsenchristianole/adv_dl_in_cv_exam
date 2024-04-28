@@ -49,3 +49,10 @@ plot-wikiart-data:
 
 plot-elo-scores:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/plots/elo_score_plots.py
+
+
+sample-diff-timeline:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/plots/diff_sample_timeline.py --sample
+
+plot-diff-timeline:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIR)/plots/diff_sample_timeline.py --plot

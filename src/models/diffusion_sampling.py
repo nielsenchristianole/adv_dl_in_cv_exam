@@ -18,8 +18,9 @@ def plot_tensor(x):
     if x.ndim == 4:
         num_imgs = x.shape[0]
         import math
-        num_rows = math.ceil(math.sqrt(num_imgs))
-        fig, axs = plt.subplots(num_rows, num_rows)
+        num_cols = math.ceil(math.sqrt(num_imgs))
+        num_rows = math.floor(math.sqrt(num_imgs))
+        fig, axs = plt.subplots(num_rows if num_rows*num_cols>=num_imgs else num_cols, num_cols)
         axs = axs.flatten()
     for ax, img in zip(axs, x):
         img -= img.min()
@@ -102,14 +103,21 @@ def sample_guidance(model, x, classifier, label, steps, eta, extra_args, classif
     return pred
 
 
+
 # DDPM/DDIM sampling
 @torch.no_grad()
-def sample(model, x, steps, eta, extra_args, callback=None):
+def sample(model, x, steps, eta, extra_args, callback=None, plot_preds = False, plot_preds_folder="figures/sample_preds"):
     """Draws samples from a model given starting noise."""
     ts = x.new_ones([x.shape[0]])
 
     # Create the noise schedule
     alphas, sigmas = utils.t_to_alpha_sigma(steps)
+
+    if plot_preds:
+        # create folder if it doesn't exist
+        import os
+        if not os.path.exists(plot_preds_folder):
+            os.makedirs(plot_preds_folder)
 
     # The sampling loop
     for i in trange(len(steps), disable=None):
@@ -121,6 +129,9 @@ def sample(model, x, steps, eta, extra_args, callback=None):
         # Predict the noise and the denoised image
         pred = x * alphas[i] - v * sigmas[i]
         eps = x * sigmas[i] + v * alphas[i]
+
+        if plot_preds and i % 5 == 0:
+            save_image(pred, f"{plot_preds_folder}/{i}.png")
 
         # Call the callback
         if callback is not None:
@@ -175,8 +186,8 @@ def cond_sample(
 
         # check for nans
         if torch.isnan(x).any():
-            print(i)
-            raise ValueError("x contains NaNs")
+            print(i, "x contains NaNs")
+            return
 
         # Get the model output
         with torch.enable_grad():
@@ -184,9 +195,9 @@ def cond_sample(
             with torch.cuda.amp.autocast():
                 v = model(x, ts * steps[i], **extra_args)
 
-            pred = x * alphas[i] - v * sigmas[i]
-
             if steps[i] < 1:
+                pred = x * alphas[i] - v * sigmas[i]
+
                 _pred = pred.clone().detach().requires_grad_(True)
                 logits = classifier(_pred)
                 loss = torch.nn.functional.cross_entropy(logits, label)
@@ -196,7 +207,7 @@ def cond_sample(
             else:
                 v = v.detach()
 
-        if num_backward_steps > 0:        
+        if (num_backward_steps > 0) and (steps[i] < 1) and (i < len(steps) - 1):
             pred = x * alphas[i] - v * sigmas[i]
 
             with torch.enable_grad():
@@ -213,7 +224,7 @@ def cond_sample(
 
                     delta = delta - backward_step_size * delta.grad
 
-                v = (v - delta * torch.sqrt(alphas[i] / (1 - alphas[i])))
+                v = (v - backward_guidance_scale * delta * torch.sqrt(alphas[i] / (1 - alphas[i])))
 
         # Predict the noise and the denoised image
         pred = x * alphas[i] - v * sigmas[i]
