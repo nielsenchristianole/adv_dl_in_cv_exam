@@ -38,10 +38,10 @@ eta=1
 target_label = 'Cubism'
 
 
-forward_guidance_scale=15
+forward_guidance_scale=23
 num_backward_steps=5
 backward_step_size=1e-1
-backward_guidance_scale=0.4
+backward_guidance_scale=0.8
 
 
 target_index = dataset.label_to_index[target_label]
@@ -68,7 +68,10 @@ with torch.no_grad():
     loss = torch.nn.functional.cross_entropy(out, target_tensor)
     probs = torch.nn.functional.softmax(out, dim=1)
     print(f"Loss: {loss.item()}")
+    print(f"Target class: {target_index}, {target_label}")
     print(f"Predicted class: {probs.argmax(dim=1).detach().cpu().numpy()}")
+    for i in range(num_samples):
+        print(f"Sample {i}: {dataset.index_to_label[probs.argmax(dim=1)[i].detach().cpu().numpy()]}")
     print(f"Target class probability: {probs[:, target_index].detach().cpu().numpy()}")
     print(f"Predicted probability: {probs.max(dim=1).values.detach().cpu().numpy()}")
     # print(np.array2string(probs.detach().cpu().numpy(), precision=3))
