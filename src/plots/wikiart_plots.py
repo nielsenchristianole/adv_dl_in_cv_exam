@@ -28,12 +28,15 @@ class WikiArtDatasetPlotter():
         wikiart_path = self.wikiart_path
         print("wikiart_path: ", wikiart_path)
 
-        counts = np.array(list(self.class_counts.values()), dtype=float)
-        sample_counts = np.array(list(self.samples_class_counts().values()), dtype=float)
+        ckeys = sorted(list(self.class_counts.keys()))
+
+        counts = np.array(list(self.class_counts[c] for c in ckeys), dtype=float)
+        sample_counts = np.array(list(self.samples_class_counts[c] for c in ckeys), dtype=float)
+
+        print("Total ddpm samples", sample_counts.sum())
 
         # Make histogram of image counts
         fig, ax1 = plt.subplots(figsize=(8, 5))
-        ckeys = list(self.class_counts.keys())
         pos = np.arange(len(counts))
         # replace _ with space for better readability
         ckeys = [c.replace("_", " ") for c in ckeys]
@@ -89,13 +92,15 @@ class WikiArtDatasetPlotter():
 
         # plot
 
+    @cached_property
     def samples_class_counts(self):
         counts = {}
         for folder in self.classes:
-            if os.path.isdir(os.path.join('data/samples', folder)):
-                files = os.listdir(os.path.join('data/samples', folder))
+            if os.path.isdir(os.path.join('data/sampled_images', folder)):
+                files = os.listdir(os.path.join('data/sampled_images', folder))
                 counts[folder] = len(files)
             else:
+                print(f"Folder {folder} not found in samples folder.")
                 counts[folder] = 0
         return counts
 
