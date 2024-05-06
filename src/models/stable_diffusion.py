@@ -25,7 +25,7 @@ def latents_to_pil(latents, vae):
     '''
     Function to convert latents to images
     '''
-    latents = (1 / 0.18215) * latents
+    latents = (1 / vae.config.scaling_factor) * latents
     with torch.no_grad():
         image = vae.decode(latents).sample
     image = (image / 2 + 0.5).clamp(0, 1)
@@ -33,6 +33,17 @@ def latents_to_pil(latents, vae):
     images = (image * 255).round().astype("uint8")
     pil_images = [Image.fromarray(image) for image in images]
     return pil_images
+
+def latents_to_image(latents, vae):
+    latents = (1 / vae.config.scaling_factor) * latents # scale
+    image = vae.decode(latents).sample # decode
+    image = (image / 2 + 0.5).clamp(0, 1) # denormalize
+    image = image.permute(0, 2, 3, 1) # reshape
+    image = (image * 255).round().astype(torch.int16) # [0, 255]
+    return image
+
+def image_to_latent(image, vae):
+    pass
 
 
 class StableDiffusion:
@@ -51,7 +62,6 @@ class StableDiffusion:
         
         #### INIT VAE
         self.vae = AutoencoderKL.from_pretrained(self.model_name, subfolder="vae", torch_dtype=self.dtype, cache_dir=self.cache_dir).to(self.device)
-        self.imageprocessor = VaeImageProcessor(vae_scale_factor=self.vae.config.scaling_factor)
         self.scheduler = LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
         
         #### INIT CLIP (for embedding prompts)
@@ -77,16 +87,19 @@ class StableDiffusion:
         Denormalize an image array to [0,1].
         """
         return (images / 2 + 0.5).clamp(0, 1)
-    
-    def latent2image(self, latent):
-        image = self.vae.decode(latent / self.vae.config.scaling_factor, return_dict=False)
-        image = (self.denormalize(image) * 255).round().to(torch.int16)
-        return 
-    
-    def image2latent(self, image):
-        self.vae.encode()
 
-    def sample(self, prompt, guidance_scale, n_steps: int, init_latents, do_cfg: bool = True):
+    @torch.no_grad()
+    def sample(self, 
+               prompt: str, 
+               guidance_scale: int, 
+               n_steps: int, 
+               init_latents: torch.tensor,
+               do_cg: bool = True,
+               num_backward_steps: int = 10,
+               backward_step_size: float = 0.1,
+               backward_guidance_scale: float = 5,
+               cg_label: torch.tensor = torch.tensor([26]), dtype=torch.int16):
+        
         if init_latents is None:
             init_latents = torch.randn((1, self.unet.config.in_channels, 64, 64), device=self.device, dtype=self.unet.dtype)
         
@@ -104,39 +117,41 @@ class StableDiffusion:
         latents = latents * self.scheduler.init_noise_sigma
 
         # run diffusion
-        with torch.no_grad():
-            for i, ts in enumerate(tqdm(self.scheduler.timesteps)):
-                
-                unet_ipt = self.scheduler.scale_model_input(torch.cat([latents] * 2), ts)
-                # print(f'Latents shape: {latents.shape}')
-                
-                noise_pred_uncond, noise_pred_text = self.unet(unet_ipt, ts, encoder_hidden_states=emb).sample.chunk(2)
-                
-                # do cfg
-                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-                # run the guidance transform
-                # pred = gtfm.encode(u, t, idx=i)
+        for i, ts in enumerate(tqdm(self.scheduler.timesteps)):
+           
+            unet_ipt = self.scheduler.scale_model_input(torch.cat([latents] * 2), ts)
+            
+            noise_pred_uncond, noise_pred_text = self.unet(unet_ipt, ts, encoder_hidden_states=emb).sample.chunk(2)
+            
+            # do classifier free guidance
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            
+            # update the latents
+            latents = self.scheduler.step(noise_pred, ts, latents).prev_sample
 
-                # update the latents
-                latents = self.scheduler.step(noise_pred, ts, latents).prev_sample
+            # do classifier guidance
+            if do_cg:
+                with torch.enable_grad():
+                    latents_grad = latents.clone().detach().requires_grad(True)
+                    delta = torch.zeros_like(latents_grad)
+
+                    # backward universal guidance
+                    for _ in range(num_backward_steps):
+
+                        cg_ipt = latents_to_image(latents_grad, self.vae)
+                        delta = delta.detach().clone().requires_grad_(True)
+
+                        logits = self.cg_model(cg_ipt + delta)
+                        loss = torch.nn.functional.cross_entropy(logits, cg_label)
+                        loss.backward()
+
+                        delta = delta - backward_step_size * delta.grad
+                
+                noise_pred += delta * backward_guidance_scale
+
+                # calculate x_{t-1}
+                latents = self.scheduler.step(noise_pred, ts, latents_grad).prev_sample
+        
             
-            # decode and return the final latents
-            # image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0]
-            
-        # pdb.set_trace()
-        # print(f'final img shape: {image.shape}')
-        # processed_img = self.imageprocessor.postprocess(image, do_denormalize=[True]*image.size(0))
         PIL_image = latents_to_pil(latents, self.vae)
         return PIL_image
-
-
-    def universal_guidance(self):
-        pass
-
-
-if __name__ == '__main__':
-    from torchvision.utils import save_image
-
-    # SD = StableDiffusion()
-    # sample = SD.sample("A painting", 1, 10, None)
-    pdb.set_trace()
