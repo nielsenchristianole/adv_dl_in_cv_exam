@@ -1,3 +1,6 @@
+from typing import Callable, Any
+from copy import deepcopy
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -37,9 +40,9 @@ def latents_to_pil(latents, vae):
 def latents_to_image(latents, vae):
     latents = (1 / vae.config.scaling_factor) * latents # scale
     image = vae.decode(latents).sample # decode
-    image = (image / 2 + 0.5).clamp(0, 1) # denormalize
-    image = image.permute(0, 2, 3, 1) # reshape
-    image = (image * 255).round().astype(torch.int16) # [0, 255]
+    # image = (image / 2 + 0.5).clamp(0, 1) # denormalize
+    # image = image.permute(0, 2, 3, 1) # reshape
+    # image = (image * 255).round().to(torch.int16) # [0, 255]
     return image
 
 def image_to_latent(image, vae):
@@ -47,12 +50,13 @@ def image_to_latent(image, vae):
 
 
 class StableDiffusion:
-    def __init__(self, cahce_dir: str) -> None:
-        self.device = ('cuda' if torch.cuda.is_available() else 'cpu')
+    def __init__(self, cahce_dir: str, cg_model: Callable[[Any], torch.Tensor], device=None) -> None:
+        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         print(f'INITIALIZING DIFFUSION ON DEIVCE: {self.device}')
         self.model_name = "stabilityai/stable-diffusion-2-1-base"
         self.dtype = torch.float16
         self.cache_dir = cahce_dir
+        self.cg_model = cg_model
         
         os.environ['HF_HOME'] = self.cache_dir
         os.environ['HF_HUB_CACHE'] = self.cache_dir
@@ -93,13 +97,13 @@ class StableDiffusion:
                prompt: str, 
                guidance_scale: int, 
                n_steps: int, 
-               init_latents: torch.tensor,
-               do_cg: bool = True,
-               num_backward_steps: int = 10,
+               init_latents: torch.tensor=None,
+               num_backward_steps: int = 4,
                backward_step_size: float = 0.1,
                backward_guidance_scale: float = 5,
                cg_label: torch.tensor = torch.tensor([26]), dtype=torch.int16):
-        
+        cg_label = cg_label.to(self.device)
+
         if init_latents is None:
             init_latents = torch.randn((1, self.unet.config.in_channels, 64, 64), device=self.device, dtype=self.unet.dtype)
         
@@ -107,7 +111,6 @@ class StableDiffusion:
 
         # prepare text embeddings
         text = text_embeddings(self.tokenizer, self.text_encoder, prompt, self.device, maxlen=None)
-        
         uncond = text_embeddings(self.tokenizer, self.text_encoder, '', self.device, maxlen=None)
         emb = torch.cat([uncond, text]).type(self.unet.dtype)
 
@@ -127,31 +130,37 @@ class StableDiffusion:
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
             
             # update the latents
-            latents = self.scheduler.step(noise_pred, ts, latents).prev_sample
+            inside_stepper = deepcopy(self.scheduler)
+            scheduler_out = self.scheduler.step(noise_pred, ts, latents)
+            # latens = scheduler_out.prev_sample
+            latens_0 = scheduler_out.pred_original_sample
 
             # do classifier guidance
-            if do_cg:
+            if i != n_steps-1:
                 with torch.enable_grad():
-                    latents_grad = latents.clone().detach().requires_grad(True)
-                    delta = torch.zeros_like(latents_grad)
+                    _latens_0 = latens_0.clone().detach().requires_grad_(True)
+                    delta = torch.zeros_like(_latens_0)
 
                     # backward universal guidance
                     for _ in range(num_backward_steps):
-
-                        cg_ipt = latents_to_image(latents_grad, self.vae)
                         delta = delta.detach().clone().requires_grad_(True)
+                        cg_ipt = latents_to_image(_latens_0 + delta, self.vae)
 
-                        logits = self.cg_model(cg_ipt + delta)
+                        # logits = self.cg_model(cg_ipt.to('cpu'))
+                        logits = self.cg_model(cg_ipt)
                         loss = torch.nn.functional.cross_entropy(logits, cg_label)
                         loss.backward()
 
                         delta = delta - backward_step_size * delta.grad
                 
-                noise_pred += delta * backward_guidance_scale
-
                 # calculate x_{t-1}
-                latents = self.scheduler.step(noise_pred, ts, latents_grad).prev_sample
+                latents = inside_stepper.step(
+                    noise_pred - delta * backward_guidance_scale,
+                    ts, latents).prev_sample
+
+            else:
+                latents = inside_stepper.step(
+                    noise_pred,
+                    ts, latents).prev_sample
         
-            
-        PIL_image = latents_to_pil(latents, self.vae)
-        return PIL_image
+        return latents
