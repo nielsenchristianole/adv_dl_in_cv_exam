@@ -1,12 +1,9 @@
-import pdb
-
 import torch
 
 from src.models.CLIP import CLIPWithHead, LinearHead
 from src.models.stable_diffusion import StableDiffusion
 
 
-# device = torch.device('cpu')
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 num_classes = 27
@@ -17,17 +14,22 @@ classifier = CLIPWithHead(linear_head_model, crop_and_norm=False).to(device).eva
 
 
 if __name__ == '__main__':
-    cg_label = torch.tensor((26,), device=device)
+    num_samples = 2
+    cg_label = torch.tensor(num_samples * (26,), device=device)
 
-    SD = StableDiffusion(cahce_dir='.', cg_model=classifier)#, device=device)
+    SD = StableDiffusion(cahce_dir='.', cg_model=classifier, device=device)
     _sample = SD.sample(
-        'A closeup image of a painting',
-        guidance_scale = 10,
-        n_steps = 50,
-        num_backward_steps=2,
-        backward_guidance_scale=0.5,
-        cg_label = cg_label
+        'A painting',
+        num_samples=num_samples,
+        cg_label = cg_label,
+        cfg_guidance_scale = 1,
+        forward_guidance_scale = 500,
+        backward_guidance_scale = 1,
+        num_backward_steps = 5,
+        backward_step_size = 0.1,
+        num_inference_steps=50
     )
+
 
     from src.models.stable_diffusion import latents_to_pil, latents_to_image
 
@@ -37,12 +39,8 @@ if __name__ == '__main__':
         probs = torch.nn.functional.softmax(out, dim=1)
         print(f"Loss: {loss.item()}")
         print(f"Predicted class: {probs.argmax(dim=1).detach().cpu().numpy()}")
-        print(f"Target class probability: {probs[:, cg_label.item()].detach().cpu().numpy()}")
+        print(f"Target class probability: {probs[:, cg_label[0]].detach().cpu().numpy()}")
         print(f"Predicted probability: {probs.max(dim=1).values.detach().cpu().numpy()}")
-        # print(np.array2string(probs.detach().cpu().numpy(), precision=3))
 
-    
-    
     for i, img in enumerate(latents_to_pil(_sample, SD.vae), start=1):
         img.save(f'SD_sample{i}.png')
-    # pdb.set_trace()
