@@ -171,6 +171,7 @@ class CLIPProcessorWithGrads:
         return imgs
 
     def __call__(self, imgs: torch.tensor,  **kwargs):
+        kwargs.pop('padding', None)
         processed_features = self.processor(**kwargs)
         processed_features['pixel_values'] = self.preprocess_images(imgs)
         processed_features = {key:value.to(imgs.device) for (key, value) in processed_features.items()}
