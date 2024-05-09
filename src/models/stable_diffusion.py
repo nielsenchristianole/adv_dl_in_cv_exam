@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Callable, Any, Optional
 
 from PIL import Image
@@ -182,6 +183,13 @@ class StableDiffusion:
                         loss.backward()
 
                         delta = delta - backward_step_size * delta.grad
+
+                        if (logits.argmax(dim=1) == cg_label).all():
+                            break
+                    
+                    else:
+                        logging.warning('Did not produce an adversarial')
+
                     
                     delta = delta.detach()
                 
