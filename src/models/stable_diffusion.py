@@ -124,8 +124,8 @@ class StableDiffusion:
 
 
         # run diffusion
-        for t, prev_t in zip(tqdm(timesteps), prev_timesteps):
-            alpha = self.scheduler.alphas[t]
+        for t, prev_t in zip(tqdm(timesteps, leave=False), prev_timesteps):
+            #current_alpha_t = alpha_prod_t / alpha_prod_t_prev#self.scheduler.alphas[t]
             alpha_prod_t = self.scheduler.alphas_cumprod[t]
             alpha_prod_t_prev = self.scheduler.alphas_cumprod[prev_t] if prev_t >= 0 else self.scheduler.one
             beta_prod_t = 1 - alpha_prod_t
@@ -153,7 +153,7 @@ class StableDiffusion:
             if forward_guidance_scale:
                 with torch.enable_grad():
                     _z_t = z_t.clone().detach().requires_grad_(True)
-                    _z_0 = (_z_t - torch.sqrt(1 - alpha) * eps) / torch.sqrt(alpha)
+                    _z_0 = (_z_t - torch.sqrt(1 - current_alpha_t) * eps) / torch.sqrt(current_alpha_t)
                     _x_0 = latents_to_image(_z_0, self.vae)
                     logits = self.cg_model(_x_0)
                     loss = F.cross_entropy(logits, cg_label)
@@ -163,8 +163,8 @@ class StableDiffusion:
             else:
                 nabla_z_t = 0
 
-            forward_guided_eps = eps + forward_guidance_scale * torch.sqrt(1 - alpha) * nabla_z_t
-            forward_guided_z_0 = (z_t - torch.sqrt(1 - alpha) * forward_guided_eps) / torch.sqrt(alpha)
+            forward_guided_eps = eps + forward_guidance_scale * torch.sqrt(1 - current_alpha_t) * nabla_z_t
+            forward_guided_z_0 = (z_t - torch.sqrt(1 - current_alpha_t) * forward_guided_eps) / torch.sqrt(current_alpha_t)
 
             # backward guidance
             if t != 0 and num_backward_steps:
@@ -173,7 +173,7 @@ class StableDiffusion:
                     delta = torch.zeros_like(_z_0)
 
                     # backward universal guidance
-                    for _ in range(num_backward_steps):
+                    for bw_step in range(num_backward_steps):
                         delta = delta.detach().clone().requires_grad_(True)
                         cg_ipt = latents_to_image(_z_0 + delta, self.vae)
 
@@ -185,6 +185,7 @@ class StableDiffusion:
                         delta = delta - backward_step_size * delta.grad
 
                         if (logits.argmax(dim=1) == cg_label).all():
+                            print(f"Broke out at: {bw_step} out of {num_backward_steps}")
                             break
                     
                     else:
@@ -193,13 +194,13 @@ class StableDiffusion:
                     
                     delta = delta.detach()
                 
-                backward_guided_eps = forward_guided_eps - backward_guidance_scale * torch.sqrt(alpha / (1 - alpha)) * delta
-                backward_guided_z_0 = (z_t - torch.sqrt(1 - alpha) * backward_guided_eps) / torch.sqrt(alpha)
+                backward_guided_eps = forward_guided_eps - backward_guidance_scale * torch.sqrt(current_alpha_t / (1 - current_alpha_t)) * delta
+                backward_guided_z_0 = (z_t - torch.sqrt(1 - current_alpha_t) * backward_guided_eps) / torch.sqrt(current_alpha_t)
 
-                z_t = torch.sqrt(alpha) * backward_guided_z_0 + torch.sqrt(1 - alpha) * backward_guided_eps
+                z_t = torch.sqrt(current_alpha_t) * backward_guided_z_0 + torch.sqrt(1 - current_alpha_t) * backward_guided_eps
             
             else:
-                z_t = torch.sqrt(alpha) * forward_guided_z_0 + torch.sqrt(1 - alpha) * forward_guided_eps
+                z_t = torch.sqrt(current_alpha_t) * forward_guided_z_0 + torch.sqrt(1 - current_alpha_t) * forward_guided_eps
 
             # add noise
             if t != 0:
