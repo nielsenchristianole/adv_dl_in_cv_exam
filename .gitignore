@@ -169,3 +169,5 @@ cython_debug/
 
 lightning_logs/
 model_checkpoints/
+.locks
+models--stabilityai--stable-diffusion-2-1-base/

@@ -103,14 +103,21 @@ def sample_guidance(model, x, classifier, label, steps, eta, extra_args, classif
     return pred
 
 
+
 # DDPM/DDIM sampling
 @torch.no_grad()
-def sample(model, x, steps, eta, extra_args, callback=None):
+def sample(model, x, steps, eta, extra_args, callback=None, plot_preds = False, plot_preds_folder="figures/sample_preds"):
     """Draws samples from a model given starting noise."""
     ts = x.new_ones([x.shape[0]])
 
     # Create the noise schedule
     alphas, sigmas = utils.t_to_alpha_sigma(steps)
+
+    if plot_preds:
+        # create folder if it doesn't exist
+        import os
+        if not os.path.exists(plot_preds_folder):
+            os.makedirs(plot_preds_folder)
 
     # The sampling loop
     for i in trange(len(steps), disable=None):
@@ -125,6 +132,9 @@ def sample(model, x, steps, eta, extra_args, callback=None):
         # Predict the noise and the denoised image
         pred = x * alphas[i] - v * sigmas[i]
         eps = x * sigmas[i] + v * alphas[i]
+
+        if plot_preds and i % 5 == 0:
+            save_image(pred, f"{plot_preds_folder}/{i}.png")
 
         # Call the callback
         if callback is not None:
