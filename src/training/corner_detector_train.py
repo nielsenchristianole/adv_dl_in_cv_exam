@@ -10,6 +10,7 @@ from src.dataloader.corner_detection_loader import CornerDataset
 
 import cv2
 import numpy as np
+import os
 
 import torch.nn as nn
 import torch.optim as optim
@@ -29,6 +30,16 @@ class CornerDetector(L.LightningModule):
         last_channel = self.mobile_net.classifier[-1].in_features
         self.mobile_net.classifier[-1] = nn.Linear(last_channel, 8)
 
+        # Create train loss file if it doesn't exist
+        if not os.path.exists(self.train_loss_file):
+            with open(self.train_loss_file, 'w') as f:
+                pass
+
+        # Create val loss file if it doesn't exist
+        if not os.path.exists(self.val_loss_file):
+            with open(self.val_loss_file, 'w') as f:
+                pass
+
     def forward(self, x):
         return self.mobile_net(x)
 
@@ -39,6 +50,8 @@ class CornerDetector(L.LightningModule):
         loss = nn.MSELoss()(outputs[:-1], targets[:-1])
         
         if batch_idx == 0:
+            with open('train_loss.txt', 'a') as f:
+                f.write(loss.item())
             self.log('train/loss', loss)
             self._log_predictions(batch, outputs, "train")
         return loss
@@ -50,6 +63,8 @@ class CornerDetector(L.LightningModule):
         loss = nn.MSELoss()(outputs[:-1], targets[:-1])
         
         if batch_idx <= 10:
+            with open('val_loss.txt', 'a') as f:
+                f.write(loss.item())
             self.log('val/loss', loss)
             self._log_predictions(batch, outputs, "val")
             
@@ -93,10 +108,10 @@ if __name__ == '__main__':
     name = input("Insert name of training:")
     
     scale_to = 256
-    batch_size = 16
+    batch_size = 2
     
-    train_dataset = CornerDataset(is_train=True, scale_to=scale_to)
-    val_dataset = CornerDataset(is_train=False, scale_to=scale_to)
+    train_dataset = CornerDataset(is_train=True, scale_to=scale_to, train_split = 0.85)
+    val_dataset = CornerDataset(is_train=False, scale_to=scale_to, train_split=0.85)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                               num_workers=5, pin_memory=True, persistent_workers=True)
