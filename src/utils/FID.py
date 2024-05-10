@@ -18,12 +18,13 @@ from src.dataloader.annotated_image import AnnotatedImageDataset
 # import the partials package
 from functools import partial
 from pathlib import Path
+from src.dataloader.cropped_dataloader import GeneratedData
 
 class VGG(nn.Module):
     def __init__(self):
         super().__init__()
         # https://pytorch.org/vision/main/models/generated/torchvision.models.vgg11.html
-        self.features = torchvision.models.vgg11(weights=torchvision.models.VGG11_Weights.DEFAULT).features()[:10]
+        self.features = torchvision.models.vgg11(weights=torchvision.models.VGG11_Weights.DEFAULT).features[:10]
         self.avg_pool = nn.AdaptiveAvgPool2d((1,1))
 
     def forward(self, x):
@@ -39,46 +40,92 @@ class FID:
         self.feature_extractor = feature_extractor
         self.samples_per_fid = samples_per_fid
         
-    def calculate_fid(self, *, dataloader, sample_method, class_idx, class_name):
-        # TODO: Add method description
-
+    def extract_features(self, *, dataloader, class_idx, class_name):
+        
         os.makedirs('out/FID_data', exist_ok=True)
         
         # TODO: Adjust the number of samples by samples_per_fid
-        features_real = np.empty((len(dataloader.dataset), 256))
-        features_gen = np.empty((len(dataloader.dataset), 256))
+        features_class = None
         
         start_idx = 0
         for i, (images, _) in tqdm(enumerate(dataloader), leave=False):
             n_samples = images.shape[0]
             
+            # Plot the first 10 images in the batch
+            if start_idx + n_samples <= self.samples_per_fid:
+                fig, axes = plt.subplots(4, 10, figsize=(20, 8), dpi=300)
+                for k in range(n_samples):
+                    ax = axes[k // 10, k % 10]
+                    ax.imshow(images[k].permute(1, 2, 0).cpu().numpy().astype(np.uint8))
+                    ax.axis('off')
+                plt.tight_layout()
+                plt.savefig(f'out/FID_data/images_{class_name}_{start_idx}.pdf', format='pdf', bbox_inches='tight', dpi=300, transparent=True)
+                plt.title(f'Sampled images')
+                plt.close(fig)
+                exit()
+            
             images = images.to(self.device)
-            features_real[start_idx:start_idx + n_samples] = self._get_features(images)
-            
-            x = torch.randn([n_samples, 3, 256, 256], requires_grad=True).to(device)
-            label = torch.tensor(n_samples*(class_idx,), device=device)
-            
-            gen_images : torch.Tensor = sample_method(x = x, label = label)
-            
-            features = self._get_features(gen_images)
-            features_gen[start_idx:start_idx + gen_images.shape[0]] = features
-            start_idx = start_idx + images.shape[0]
+            new_features = self._get_features(images)
+            if features_class is None:
+                features_class = new_features
+            else:
+                features_class = np.concatenate((features_class, new_features), axis=0)
             
             # save the generated features so far as npy files
-            np.save(f'out/FID_data/features-batch_{i}-class_{class_name}-real.npy', features_real)
-            np.save(f'out/FID_data/features-batch_{i}-class_{class_name}-gen.npy', features_real)
-            
-        mu_real, sigma_real = self._feature_statistics(features_real)
-        mu_gen, sigma_gen = self._feature_statistics(features_gen)
+        np.save(f'out/FID_data/features-class_{class_name}.npy', features_class)
         
-        fid = self._frechet_distance(mu_real, sigma_real, mu_gen, sigma_gen)
+    def calculate_fid(self, path1, path2):
+        features1 = np.load(path1)
+        features2 = np.load(path2)
         
-        # Append the mean, std and FID to a .txt file
-        with open('out/FID_data/fid.txt', 'a') as f:
-            f.write(f'{mu_real} {sigma_real} {class_name} {mu_gen} {sigma_gen} {fid}\n')
+        mu1, sigma1 = self._feature_statistics(features1)
+        mu2, sigma2 = self._feature_statistics(features2)
+        
+        fid = self._frechet_distance(mu1, sigma1, mu2, sigma2)
         
         return fid
         
+    def pairwise_calculate_fid(self, *, classes):
+        # TODO: Add method description
+
+        os.makedirs('out/FID_data', exist_ok=True)
+        
+        pbar = tqdm(total = len(classes)**2)
+        
+        fids = np.zeros((len(classes), len(classes)))
+        # pairwise calculate the FID between classes
+        for i, class1 in enumerate(classes):
+            for j, class2 in enumerate(classes):
+                pbar.update(1)
+                if class1 == class2:
+                    fids[i, j] = 0
+                    with open('out/FID_data/fid.txt', 'a') as f:
+                        f.write(f'{fids[i, j]}\n')
+                    continue
+                
+                features1 = np.load(f'out/FID_data/features-class_{class1}.npy')
+                features2 = np.load(f'out/FID_data/features-class_{class2}.npy')
+                
+                mu1, sigma1 = self._feature_statistics(features1)
+                mu2, sigma2 = self._feature_statistics(features2)
+                
+                fid = self._frechet_distance(mu1, sigma1, mu2, sigma2)
+                fids[i, j] = fid
+                
+                # Append the mean, std and FID to a .txt file
+                with open('out/FID_data/fid.txt', 'a') as f:
+                    f.write(f'{fid}\n')
+        # plot the FID matrix
+        plt.imshow(fids, cmap='viridis')
+        plt.colorbar()
+        # plt.xticks(np.arange(len(classes)), classes, rotation=45)
+        # plt.yticks(np.arange(len(classes)), classes, rotation=45)
+        plt.xlabel('Class index')
+        plt.ylabel('Class index')
+        plt.title('FID matrix')
+        plt.savefig('out/FID_data/fid_matrix.pdf', format='pdf', bbox_inches='tight', dpi=300, transparent=True)
+        plt.show()
+
     def _get_features(self, images):
         # TODO: Add method description
         self.feature_extractor.eval()
@@ -92,12 +139,25 @@ class FID:
     def _feature_statistics(self, features):
         # TODO: Add method description
         mu = np.mean(features, axis=0)
+        # add a small epsilon to the covariance matrix to avoid singular matrix
+        
         sigma = np.cov(features, rowvar=False)
+        
+        if np.isnan(sigma).any():
+            # replace nan values with small epsilon
+            sigma = np.nan_to_num(sigma)
+            sigma = sigma + 1e-10
         return mu, sigma
 
     def _frechet_distance(self, mu1, sigma1, mu2, sigma2):
 
-        fid = np.sum((mu1 - mu2)**2) + np.trace(sigma1 + sigma2 - 2*linalg.sqrtm(sigma1@sigma2))
+
+        covmean = linalg.sqrtm(sigma1.dot(sigma2))
+        # check and correct imaginary numbers from sqrt
+        if np.iscomplexobj(covmean):
+            covmean = covmean.real
+
+        fid = np.sum((mu1 - mu2)**2) + np.trace(sigma1 + sigma2 - 2*covmean)
 
         return fid
 
@@ -154,15 +214,33 @@ if __name__ == '__main__':
     feature_extractor = VGG()
     fid_calculator = FID(feature_extractor, device)
     
-    batch_size = 64
+    batch_size = 40
     
-    for idx, name in enumerate(classes):
+    # dataloader = DataLoader(dataset.get_dataset_split_subset('test'), batch_size=batch_size, shuffle=True, drop_last=False)
+    dataset = GeneratedData(Path('data/sampled_images'))
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    
+    fid_calculator.extract_features(dataloader = dataloader,
+                                     class_idx = 0,
+                                     class_name = 'sampled_images')
+    
+    # fid = fid_calculator.calculate_fid('out/FID_data/features-class_wikiart_test.npy', 'out/FID_data/features-class_sampled_images.npy')
+    # print(fid)
+    
+    # for idx, name in tqdm(enumerate(classes), total = len(classes)):
 
-        dataloader = DataLoader(dataset.get_dataset_label_subset(name), batch_size=batch_size, shuffle=True)
-        partial_cond_sample = setup_diffusion_model(device = device)
+    #     dataloader = DataLoader(dataset.get_dataset_label_subset(name), batch_size=batch_size, shuffle=True, drop_last=False)
+    #     # partial_cond_sample = setup_diffusion_model(device = device)
     
-        fid_calculator.calculate_fid(dataloader = dataloader,
-                                     sample_method = partial_cond_sample,
-                                     class_idx = idx,
-                                     class_name = name)
+    #     fid_calculator.extract_features(dataloader = dataloader,
+    #                         #  sample_method = partial_cond_sample,
+    #                          class_idx = idx,
+    #                          class_name = name)
+        
+    # fid_calculator.pairwise_calculate_fid(classes = classes)
+    
+        # fid_calculator.calculate_fid(dataloader = dataloader,
+        #                              sample_method = partial_cond_sample,
+        #                              class_idx = idx,
+        #                              class_name = name)
         
